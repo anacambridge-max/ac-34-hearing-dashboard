@@ -27,7 +27,9 @@ function findKey(row:Row,names:string[]){
   return "";
 }
 function val(row:Row,names:string[]){const k=findKey(row,names);return k?row[k]:""}
-function person(row:Row,nameNames:string[],contactNames:string[]){const p=splitPerson(val(row,nameNames));const contact=norm(val(row,contactNames));return {name:p.name,contact:p.contact||contact}}\n\nfunction splitPerson(v:any){
+function person(row:Row,nameNames:string[],contactNames:string[]){const p=splitPerson(val(row,nameNames));const contact=norm(val(row,contactNames));return {name:p.name,contact:p.contact||contact}}
+
+function splitPerson(v:any){
   const s=norm(v);
   const m=s.match(/\(\s*([^()]+?)\s*\)\s*$/);
   if(!m)return {name:s,contact:""};
@@ -148,7 +150,7 @@ export default function Page(){
      });
      const m=new Map<string,any>();
      [...eciRows,...bloRows].forEach(r=>{if(!r.ps)return;const x=m.get(r.ps)||{ps:r.ps,officer:"",officerContact:"",blo:"",bloContact:"",supervisor:"",supervisorContact:"",centre:"",generated:0,scheduled:0,delivered:0,docs:0,date:"",status:""};x.officer=x.officer||r.officer;x.officerContact=x.officerContact||r.officerContact;x.blo=x.blo||r.blo;x.bloContact=x.bloContact||r.bloContact;x.supervisor=x.supervisor||r.supervisor;x.supervisorContact=x.supervisorContact||r.supervisorContact;x.centre=x.centre||r.centre;x.generated=x.generated||r.generated;x.scheduled=x.scheduled||r.scheduled;x.delivered=x.delivered||r.delivered;x.docs=Math.max(x.docs||0,r.docs||0);x.date=x.date||r.date;x.status=x.status||r.status;m.set(r.ps,x)});
-     return [...m.values()].map(x=>({...x,pct:x.delivered?x.docs/x.delivered:0,held:/hearing\\s*held|completed|complete|concluded|disposed|^1(?:\\.0)?$|^yes$/i.test(norm(x.status))})).sort((a,b)=>Number(a.ps)-Number(b.ps));
+     return [...m.values()].map(x=>({...x,pct:x.delivered?x.docs/x.delivered:0,held:/hearing\s*held|completed|complete|concluded|disposed|^1(?:\\.0)?$|^yes$/i.test(norm(x.status))})).sort((a,b)=>Number(a.ps)-Number(b.ps));
    },[eci,blo,eciSheets,bloSheets]);
 
   const officers=useMemo(()=>[...new Set(data.map(r=>r.officer).filter(Boolean))].sort(),[data]);
