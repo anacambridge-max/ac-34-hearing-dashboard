@@ -70,13 +70,14 @@ function dateText(v:any){
 }
 function filenameSafe(v:string){return v.replace(/[^a-z0-9._-]+/gi,"_").replace(/^_+|_+$/g,"")}
 
-function makePdf(title:string,meta:string,headers:string[],rows:any[][],opts:{landscape?:boolean;redHeader?:boolean;percentCols?:number[];statusCol?:number;total?:any[]}={}){
+function makePdf(title:string,meta:string,headers:string[],rows:any[][],opts:{landscape?:boolean;redHeader?:boolean;sectionHeader?:string;percentCols?:number[];statusCol?:number;total?:any[]}={}){
   const doc=new jsPDF({orientation:opts.landscape===false?"portrait":"landscape",unit:"mm",format:"a4"});
   const navy=[31,56,100] as [number,number,number], red=[174,0,0] as [number,number,number], green=[198,239,206] as [number,number,number], lightRed=[252,221,221] as [number,number,number];
   doc.setTextColor(...navy);doc.setFontSize(16);doc.setFont("helvetica","bold");doc.text(title,14,14);
   doc.setFontSize(8);doc.setFont("helvetica","bold");doc.text(meta,14,21);
+  if(opts.sectionHeader){doc.setTextColor(...red);doc.setFontSize(10);doc.setFont("helvetica","bold");doc.text(opts.sectionHeader,14,28)}
   autoTable(doc,{
-    startY:25,head:[headers],body:rows.map(r=>r.map(x=>String(x??""))),
+    startY:opts.sectionHeader?33:25,head:[headers],body:rows.map(r=>r.map(x=>String(x??""))),
     theme:"grid",
     styles:{fontSize:7,cellPadding:1.7,lineColor:[205,205,205],lineWidth:.15,textColor:[25,25,25],valign:"middle"},
     headStyles:{fillColor:opts.redHeader?red:navy,textColor:[255,255,255],fontStyle:"bold",halign:"center"},
@@ -192,7 +193,7 @@ export default function Page(){
     const supRows=[...sups.values()].map(x=>({...x,held:x.heldSet.size,pct:x.delivered?x.docs/x.delivered:0})).filter(x=>x.delivered>0).sort((a,b)=>a.pct-b.pct).slice(0,5);
     const body=rows.map(r=>[r.ps,r.blo,r.bloContact,r.supervisor,r.supervisorContact,r.generated,r.delivered,pct(r.delivered?r.delivered/r.generated:0),r.docs,pct(r.delivered?r.docs/r.delivered:0),`Hearing Held\n(${r.date})`]);
     const supBody=supRows.map(r=>[r.supervisor,r.held,r.total,r.generated,r.delivered,pct(r.delivered?r.delivered/r.generated:0),r.docs,pct(r.delivered?r.docs/r.delivered:0)]);
-    const doc=makePdf("AC-34 MATIALA — SIR-2026 : UNDERPERFORMANCE REPORT (BLO / SUPERVISOR) — HEARING ALREADY HELD",`Officer: ${name}  |  Total Parts (PS): ${data.filter(r=>r.officer===name).length}  |  Report generated: ${new Date().toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"})}`,["Part No.","BLO Name","BLO Contact","Supervisor Name","Supervisor Contact","NO MAPPING NOTICE GENERATED","Notice Delivered","% Notice Delivered","Docs Uploaded","% Docs Uploaded","Hearing Status (Date(s))"],body,{redHeader:true,percentCols:[7,9],statusCol:10});
+    const doc=makePdf("AC-34 MATIALA — SIR-2026 : UNDERPERFORMANCE REPORT (BLO / SUPERVISOR) — HEARING ALREADY HELD",`Officer: ${name}  |  Total Parts (PS): ${data.filter(r=>r.officer===name).length}  |  Report generated: ${new Date().toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"})}`,["Part No.","BLO Name","BLO Contact","Supervisor Name","Supervisor Contact","NO MAPPING NOTICE GENERATED","Notice Delivered","% Notice Delivered","Docs Uploaded","% Docs Uploaded","Hearing Status (Date(s))"],body,{redHeader:true,sectionHeader:"■ TOP 5 UNDERPERFORMING BLOs — Hearing Already Held (lowest % Docs Uploaded)",percentCols:[7,9],statusCol:10});
     let y=(doc as any).lastAutoTable.finalY+6;
     doc.setTextColor(174,0,0);doc.setFontSize(10);doc.setFont("helvetica","bold");doc.text("■ TOP 5 UNDERPERFORMING SUPERVISORS — Hearing Already Held (lowest weighted % Docs Uploaded across their BLOs)",14,y);y+=4;
     autoTable(doc,{startY:y,head:[["Supervisor Name","BLOs (Hearing Held)","Total BLOs (PS, all)","NO MAPPING NOTICE GENERATED","Notice Delivered","% Notice Delivered","Docs Uploaded","% Docs Uploaded"]],body:supBody,theme:"grid",styles:{fontSize:7,cellPadding:1.7,lineColor:[205,205,205],textColor:[25,25,25]},headStyles:{fillColor:[174,0,0],textColor:[255,255,255],fontStyle:"bold",halign:"center"},alternateRowStyles:{fillColor:[252,238,238]},didParseCell:(d:any)=>{if(d.section==="body"&&(d.column.index===5||d.column.index===7)){const n=parseFloat(String(d.cell.raw).replace("%",""));d.cell.styles.fillColor=n<50?[252,221,221]:n<75?[255,242,204]:[234,246,234]}}});
