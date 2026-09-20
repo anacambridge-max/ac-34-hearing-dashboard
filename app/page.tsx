@@ -8,7 +8,7 @@ import {jsPDF} from "jspdf";
 import autoTable from "jspdf-autotable";
 
 type Row=Record<string,any>;
-type Sheet={name:string;rows:Row[]};
+type Sheet={name:string;rows:Row[];headers:string[]};
 
 const norm=(v:any)=>String(v??"").trim();
 const num=(v:any)=>{const n=Number(v);return Number.isFinite(n)?n:0};
@@ -27,6 +27,12 @@ function findKey(row:Row,names:string[]){
   return "";
 }
 function val(row:Row,names:string[]){const k=findKey(row,names);return k?row[k]:""}
+function splitPerson(v:any){
+  const s=norm(v);
+  const m=s.match(/\\(\\s*([^()]+?)\\s*\\)\\s*$/);
+  if(!m)return {name:s,contact:""};
+  return {name:s.slice(0,m.index).trim(),contact:m[1].trim()};
+}
 
 async function parseWorkbook(file:File):Promise<Sheet[]>{
   const buf=await file.arrayBuffer();
@@ -44,16 +50,15 @@ async function parseWorkbook(file:File):Promise<Sheet[]>{
     const rows=matrix.slice(headerIndex+1).filter(r=>r.some((x:any)=>norm(x))).map(r=>{
       const o:Row={};headers.forEach((h:string,i:number)=>o[h]=r[i]??"");return o;
     });
-    return {name,rows};
+    return {name,rows,headers};
   });
 }
 function scoreSheet(s:Sheet,type:"eci"|"blo"){
-  const sample=s.rows[0]||{};
-  const ks=Object.keys(sample).map(keyNorm).join(" ");
+  const ks=s.headers.map(keyNorm).join(" ");
   if(type==="blo"){
-    return (ks.includes("documentsuploadedbyblo")?50:0)+(ks.includes("psno")?25:0)+(ks.includes("officerlookup")?15:0)+(ks.includes("supervisorlookup")?10:0);
+    return (ks.includes("documentsuploadedbyblo")?60:0)+(ks.includes("psno")?30:0)+(ks.includes("officerlookup")?20:0)+(ks.includes("supervisorlookup")?20:0)+(ks.includes("hearingnoticescheduled")?5:0)+Math.min(10,Math.floor(s.rows.length/100));
   }
-  return (ks.includes("partno")?30:0)+(ks.includes("hearingstatus")?25:0)+(ks.includes("officername")?15:0)+(ks.includes("noticedelivered")?15:0)+(ks.includes("noticegenerated")?10:0)+(ks.includes("hearingdates")?5:0);
+  return (ks.includes("partno")?35:0)+(ks.includes("hearingstatus")?35:0)+(ks.includes("officername")?20:0)+(ks.includes("bloname")?20:0)+(ks.includes("blosupervisorname")?20:0)+(ks.includes("noticedelivered")?15:0)+(ks.includes("noticegenerated")?10:0)+(ks.includes("hearingdates")?10:0)+Math.min(10,Math.floor(s.rows.length/100));
 }
 function chooseSheet(sheets:Sheet[],type:"eci"|"blo"){
   return [...sheets].sort((a,b)=>scoreSheet(b,type)-scoreSheet(a,type))[0]||{name:"",rows:[]};
@@ -115,35 +120,23 @@ export default function Page(){
   };
 
   const data=useMemo(()=>{
-    const eciRows=eci.map(r=>({
-      ps:norm(val(r,["PS No","Part No","Part Number","Part"])),
-      officer:norm(val(r,["Officer Name","Officer"])),
-      blo:norm(val(r,["BLO Name","BLO Name "])),
-      supervisor:norm(val(r,["BLO Supervisor Name","Supervisor Name","Supervisor"])),
-      centre:norm(val(r,["Hearing Centre","Centre"])),
-      generated:num(val(r,["Notice Generated (NO MAP + ANOMALLY)","Notice Generated","NO MAPPING NOTICE GENERATED","Generated"])),
-      scheduled:num(val(r,["Hearing Notice Scheduled NO MAPPING","Hearing Notice Sched. (NM)","Hearing Notice Scheduled","Scheduled"])),
-      delivered:num(val(r,["Notice Delivered","NO MAP NOTICE DELIVERED","Delivered"])),
-      docs:num(val(r,["Documents Uploaded by BLO","Docs Uploaded"])),
-      date:norm(val(r,["Hearing Date(s)","Hearing Date","Date"])),
-      status:norm(val(r,["Hearing Status","Status"]))
-    }));
-    const bloRows=blo.map(r=>({
-      ps:norm(val(r,["PS No","Part No","Part Number"])),
-      officer:norm(val(r,["Officer (lookup)","Officer Name","Officer"])),
-      blo:norm(val(r,["BLO Name","BLO"])),
-      supervisor:norm(val(r,["Supervisor (lookup)","Supervisor Name","Supervisor"])),
-      centre:norm(val(r,["Hearing Centre","Centre"])),
-      generated:0,scheduled:num(val(r,["Hearing Notice Scheduled","Hearing Notice Sched. (NM)","Scheduled"])),
-      delivered:num(val(r,["Notice Delivered","Delivered"])),
-      docs:num(val(r,["Documents Uploaded by BLO","Docs Uploaded"])),
-      date:"",status:""
-    }));
+    const eciRows=eci.map(r=>{
+      const op=splitPerson(val(r,["Officer Name","Officer"]));
+      const bp=splitPerson(val(r,["BLO Name","BLO Name ","BLO"]));
+      const sp=splitPerson(val(r,["BLO Supervisor Name","Supervisor Name","Supervisor"]));
+      return {ps:norm(val(r,["PS No","Part No","Part Number","Part"])),officer:op.name,officerContact:op.contact,blo:bp.name,bloContact:bp.contact,supervisor:sp.name,supervisorContact:sp.contact,centre:norm(val(r,["Hearing Centre","Centre"])),generated:num(val(r,["Notice Generated (NO MAP + ANOMALLY)","Notice Generated","NO MAPPING NOTICE GENERATED","Generated"])),scheduled:num(val(r,["Hearing Notice Scheduled NO MAPPING","Hearing Notice Sched. (NM)","Hearing Notice Scheduled","Scheduled"])),delivered:num(val(r,["Notice Delivered","NO MAP NOTICE DELIVERED","Delivered"])),docs:num(val(r,["Documents Uploaded by BLO","Docs Uploaded"])),date:norm(val(r,["Hearing Date(s)","Hearing Date","Date"])),status:norm(val(r,["Hearing Status","Status"]))};
+    });
+    const bloRows=blo.map(r=>{
+      const op=splitPerson(val(r,["Officer (lookup)","Officer Name","Officer"]));
+      const bp=splitPerson(val(r,["BLO Name","BLO"]));
+      const sp=splitPerson(val(r,["Supervisor (lookup)","Supervisor Name","Supervisor"]));
+      return {ps:norm(val(r,["PS No","Part No","Part Number"])),officer:op.name,officerContact:op.contact,blo:bp.name,bloContact:bp.contact,supervisor:sp.name,supervisorContact:sp.contact,centre:norm(val(r,["Hearing Centre","Centre"])),generated:0,scheduled:num(val(r,["Hearing Notice Scheduled","Hearing Notice Sched. (NM)","Scheduled"])),delivered:num(val(r,["Notice Delivered","Delivered"])),docs:num(val(r,["Documents Uploaded by BLO","Docs Uploaded"])),date:"",status:""};
+    });
     const m=new Map<string,any>();
     [...eciRows,...bloRows].forEach(r=>{
       if(!r.ps)return;
-      const x=m.get(r.ps)||{ps:r.ps,officer:"",blo:"",supervisor:"",centre:"",generated:0,scheduled:0,delivered:0,docs:0,date:"",status:""};
-      x.officer=x.officer||r.officer;x.blo=x.blo||r.blo;x.supervisor=x.supervisor||r.supervisor;x.centre=x.centre||r.centre;
+      const x=m.get(r.ps)||{ps:r.ps,officer:"",officerContact:"",blo:"",bloContact:"",supervisor:"",supervisorContact:"",centre:"",generated:0,scheduled:0,delivered:0,docs:0,date:"",status:""};
+      x.officer=x.officer||r.officer;x.officerContact=x.officerContact||r.officerContact;x.blo=x.blo||r.blo;x.bloContact=x.bloContact||r.bloContact;x.supervisor=x.supervisor||r.supervisor;x.supervisorContact=x.supervisorContact||r.supervisorContact;x.centre=x.centre||r.centre;
       x.generated=x.generated||r.generated;x.scheduled=x.scheduled||r.scheduled;x.delivered=x.delivered||r.delivered;x.docs=Math.max(x.docs||0,r.docs||0);
       x.date=x.date||r.date;x.status=x.status||r.status;m.set(r.ps,x);
     });
@@ -179,9 +172,9 @@ export default function Page(){
   const hearingRows=officerData.filter(r=>r.held).sort((a,b)=>Number(a.ps)-Number(b.ps));
   const exportOfficerHearing=(name:string)=>{
     const rows=data.filter(r=>r.officer===name&&r.held).sort((a,b)=>Number(a.ps)-Number(b.ps));
-    const body=rows.map((r,i)=>[i+1,r.ps,r.blo,r.supervisor,r.generated,r.scheduled,r.delivered,pct(r.delivered?r.delivered/r.scheduled:0),r.docs,pct(r.delivered?r.docs/r.delivered:0),r.date,"Hearing Held"]);
-    const totals=["TOTAL","","","",rows.reduce((a,r)=>a+r.generated,0),rows.reduce((a,r)=>a+r.scheduled,0),rows.reduce((a,r)=>a+r.delivered,0),pct(rows.reduce((a,r)=>a+r.delivered,0)/Math.max(1,rows.reduce((a,r)=>a+r.scheduled,0))),rows.reduce((a,r)=>a+r.docs,0),pct(rows.reduce((a,r)=>a+r.docs,0)/Math.max(1,rows.reduce((a,r)=>a+r.delivered,0))),"",""];
-    const doc=makePdf("AC-34 MATIALA — SIR-2026 : PART WISE / PS WISE HEARING REPORT (HEARING ALREADY HELD)",`Officer: ${name}  |  Total Parts (PS): ${rows.length}  |  Report generated: ${new Date().toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"})}`,["S.No","Part No.","BLO Name","Supervisor Name","Notice Generated","Hearing Notice Sched. (NM)","Notice Delivered","% Notice Delivered","Docs Uploaded","% Docs Uploaded","Hearing Date(s)","Hearing Status"],body,{percentCols:[7,9],statusCol:11,total:totals});
+    const body=rows.map((r,i)=>[i+1,r.ps,r.blo,r.bloContact,r.supervisor,r.supervisorContact,r.generated,r.scheduled,r.delivered,pct(r.delivered?r.delivered/r.scheduled:0),r.docs,pct(r.delivered?r.docs/r.delivered:0),r.date,"Hearing Held"]);
+    const totals=["TOTAL","","","","","",rows.reduce((a,r)=>a+r.generated,0),rows.reduce((a,r)=>a+r.scheduled,0),rows.reduce((a,r)=>a+r.delivered,0),pct(rows.reduce((a,r)=>a+r.delivered,0)/Math.max(1,rows.reduce((a,r)=>a+r.scheduled,0))),rows.reduce((a,r)=>a+r.docs,0),pct(rows.reduce((a,r)=>a+r.docs,0)/Math.max(1,rows.reduce((a,r)=>a+r.delivered,0))),"",""];
+    const doc=makePdf("AC-34 MATIALA — SIR-2026 : PART WISE / PS WISE HEARING REPORT (HEARING ALREADY HELD)",`Officer: ${name}  |  Total Parts (PS): ${rows.length}  |  Report generated: ${new Date().toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"})}`,["S.No","Part No.","BLO Name","BLO Contact","Supervisor Name","Supervisor Contact","Notice Generated","Hearing Notice Sched. (NM)","Notice Delivered","% Notice Delivered","Docs Uploaded","% Docs Uploaded","Hearing Date(s)","Hearing Status"],body,{percentCols:[9,11],statusCol:13,total:totals});
     const y=(doc as any).lastAutoTable.finalY+10;doc.setFontSize(8);doc.setTextColor(70);doc.text(`Hearing Held: ${rows.length}  |  Hearing Pending: 0  |  Partially Held: 0  |  No Hearing Scheduled: 0`,14,y);
     savePdf(doc,`${filenameSafe(name)}_Part_Wise_Report_HearingHeld.pdf`);
   };
@@ -190,9 +183,9 @@ export default function Page(){
     const sups=new Map<string,any>();
     data.filter(r=>r.officer===name).forEach(r=>{const s=r.supervisor||"Unmapped";const x=sups.get(s)||{supervisor:s,heldSet:new Set<string>(),total:0,generated:0,delivered:0,docs:0};x.total++;x.generated+=r.generated;x.delivered+=r.delivered;x.docs+=r.docs;if(r.held)x.heldSet.add(r.ps);sups.set(s,x)});
     const supRows=[...sups.values()].map(x=>({...x,held:x.heldSet.size,pct:x.delivered?x.docs/x.delivered:0})).filter(x=>x.delivered>0).sort((a,b)=>a.pct-b.pct).slice(0,5);
-    const body=rows.map(r=>[r.ps,r.blo,r.supervisor,r.generated,r.delivered,pct(r.delivered?r.delivered/r.generated:0),r.docs,pct(r.delivered?r.docs/r.delivered:0),`Hearing Held\n(${r.date})`]);
+    const body=rows.map(r=>[r.ps,r.blo,r.bloContact,r.supervisor,r.supervisorContact,r.generated,r.delivered,pct(r.delivered?r.delivered/r.generated:0),r.docs,pct(r.delivered?r.docs/r.delivered:0),`Hearing Held\n(${r.date})`]);
     const supBody=supRows.map(r=>[r.supervisor,r.held,r.total,r.generated,r.delivered,pct(r.delivered?r.delivered/r.generated:0),r.docs,pct(r.delivered?r.docs/r.delivered:0)]);
-    const doc=makePdf("AC-34 MATIALA — SIR-2026 : UNDERPERFORMANCE REPORT (BLO / SUPERVISOR) — HEARING ALREADY HELD",`Officer: ${name}  |  Total Parts (PS): ${data.filter(r=>r.officer===name).length}  |  Report generated: ${new Date().toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"})}`,["Part No.","BLO Name","Supervisor Name","NO MAPPING NOTICE GENERATED","Notice Delivered","% Notice Delivered","Docs Uploaded","% Docs Uploaded","Hearing Status (Date(s))"],body,{redHeader:true,percentCols:[5,7],statusCol:8});
+    const doc=makePdf("AC-34 MATIALA — SIR-2026 : UNDERPERFORMANCE REPORT (BLO / SUPERVISOR) — HEARING ALREADY HELD",`Officer: ${name}  |  Total Parts (PS): ${data.filter(r=>r.officer===name).length}  |  Report generated: ${new Date().toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"})}`,["Part No.","BLO Name","Supervisor Name","NO MAPPING NOTICE GENERATED","Notice Delivered","% Notice Delivered","Docs Uploaded","% Docs Uploaded","Hearing Status (Date(s))"],body,{redHeader:true,percentCols:[7,9],statusCol:10});
     let y=(doc as any).lastAutoTable.finalY+6;
     doc.setTextColor(174,0,0);doc.setFontSize(10);doc.setFont("helvetica","bold");doc.text("■ TOP 5 UNDERPERFORMING SUPERVISORS — Hearing Already Held (lowest weighted % Docs Uploaded across their BLOs)",14,y);y+=4;
     autoTable(doc,{startY:y,head:[["Supervisor Name","BLOs (Hearing Held)","Total BLOs (PS, all)","NO MAPPING NOTICE GENERATED","Notice Delivered","% Notice Delivered","Docs Uploaded","% Docs Uploaded"]],body:supBody,theme:"grid",styles:{fontSize:7,cellPadding:1.7,lineColor:[205,205,205],textColor:[25,25,25]},headStyles:{fillColor:[174,0,0],textColor:[255,255,255],fontStyle:"bold",halign:"center"},alternateRowStyles:{fillColor:[252,238,238]},didParseCell:(d:any)=>{if(d.section==="body"&&(d.column.index===5||d.column.index===7)){const n=parseFloat(String(d.cell.raw).replace("%",""));d.cell.styles.fillColor=n<50?[252,221,221]:n<75?[255,242,204]:[234,246,234]}}});
@@ -206,13 +199,13 @@ export default function Page(){
       let blob:Blob|null=null;
       const rows=data.filter(r=>r.officer===name&&r.held);
       if(type==="hearing"){
-        const body=rows.sort((a,b)=>Number(a.ps)-Number(b.ps)).map((r,i)=>[i+1,r.ps,r.blo,r.supervisor,r.generated,r.scheduled,r.delivered,pct(r.scheduled?r.delivered/r.scheduled:0),r.docs,pct(r.delivered?r.docs/r.delivered:0),r.date,"Hearing Held"]);
-        const totals=["TOTAL","","","",rows.reduce((a,r)=>a+r.generated,0),rows.reduce((a,r)=>a+r.scheduled,0),rows.reduce((a,r)=>a+r.delivered,0),"",rows.reduce((a,r)=>a+r.docs,0),"","",""];
+        const body=rows.sort((a,b)=>Number(a.ps)-Number(b.ps)).map((r,i)=>[i+1,r.ps,r.blo,r.bloContact,r.supervisor,r.supervisorContact,r.generated,r.scheduled,r.delivered,pct(r.scheduled?r.delivered/r.scheduled:0),r.docs,pct(r.delivered?r.docs/r.delivered:0),r.date,"Hearing Held"]);
+        const totals=["TOTAL","","","","","",rows.reduce((a,r)=>a+r.generated,0),rows.reduce((a,r)=>a+r.scheduled,0),rows.reduce((a,r)=>a+r.delivered,0),"",rows.reduce((a,r)=>a+r.docs,0),"","",""];
         const doc=makePdf("AC-34 MATIALA — SIR-2026 : PART WISE / PS WISE HEARING REPORT (HEARING ALREADY HELD)",`Officer: ${name}  |  Total Parts (PS): ${rows.length}  |  Report generated: ${new Date().toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"})}`,["S.No","Part No.","BLO Name","Supervisor Name","Notice Generated","Hearing Notice Sched. (NM)","Notice Delivered","% Notice Delivered","Docs Uploaded","% Docs Uploaded","Hearing Date(s)","Hearing Status"],body,{percentCols:[7,9],statusCol:11,total:totals});
         blob=doc.output("blob");zip.file(`${filenameSafe(name)}_Part_Wise_Report_HearingHeld.pdf`,blob);
       }else{
         const rows2=data.filter(r=>r.officer===name&&r.held&&r.delivered>0).sort((a,b)=>a.pct-b.pct).slice(0,5);
-        const body=rows2.map(r=>[r.ps,r.blo,r.supervisor,r.generated,r.delivered,pct(r.generated?r.delivered/r.generated:0),r.docs,pct(r.delivered?r.docs/r.delivered:0),`Hearing Held\n(${r.date})`]);
+        const body=rows2.map(r=>[r.ps,r.blo,r.bloContact,r.supervisor,r.supervisorContact,r.generated,r.delivered,pct(r.generated?r.delivered/r.generated:0),r.docs,pct(r.delivered?r.docs/r.delivered:0),`Hearing Held\n(${r.date})`]);
         const doc=makePdf("AC-34 MATIALA — SIR-2026 : UNDERPERFORMANCE REPORT (BLO / SUPERVISOR) — HEARING ALREADY HELD",`Officer: ${name}  |  Total Parts (PS): ${data.filter(r=>r.officer===name).length}  |  Report generated: ${new Date().toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"})}`,["Part No.","BLO Name","Supervisor Name","NO MAPPING NOTICE GENERATED","Notice Delivered","% Notice Delivered","Docs Uploaded","% Docs Uploaded","Hearing Status (Date(s))"],body,{redHeader:true,percentCols:[5,7],statusCol:8});
         blob=doc.output("blob");zip.file(`${filenameSafe(name)}_Underperforming_BLO_Supervisor_HearingHeld.pdf`,blob);
       }
@@ -220,7 +213,7 @@ export default function Page(){
     const blob=await zip.generateAsync({type:"blob"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=type==="hearing"?"AC34_All_Officer_HearingHeld_Reports.zip":"AC34_All_Officer_Underperformance_Reports.zip";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
   };
 
-  const exportDocs=()=>{const rows=data.map(r=>[r.ps,r.blo,r.supervisor,r.officer,r.delivered,r.docs,pct(r.delivered?r.docs/r.delivered:0)]);const doc=makePdf("AC-34 MATIALA — PS-WISE DOCUMENTS UPLOADED BY BLO",`Total Parts (PS): ${data.length}  |  Report generated: ${new Date().toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"})}`,["PS","BLO Name","Supervisor Name","Officer Name","Notice Delivered","Docs Uploaded","% Docs Uploaded"],rows,{percentCols:[6]});savePdf(doc,"AC34_PS_Wise_BLO_Documents.pdf")};
+  const exportDocs=()=>{const rows=data.map(r=>[r.ps,r.officer,r.officerContact,r.blo,r.bloContact,r.supervisor,r.supervisorContact,r.delivered,r.docs,pct(r.delivered?r.docs/r.delivered:0)]);const doc=makePdf("AC-34 MATIALA — PS-WISE DOCUMENTS UPLOADED BY BLO",`Total Parts (PS): ${data.length}  |  Report generated: ${new Date().toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"})}`,["PS","Officer Name","Officer Contact","BLO Name","BLO Contact","Supervisor Name","Supervisor Contact","Notice Delivered","Docs Uploaded","% Docs Uploaded"],rows,{percentCols:[6]});savePdf(doc,"AC34_PS_Wise_BLO_Documents.pdf")};
 
   return <main>
     <header><div><div className="eyebrow">SIR-2026 • AC-34 MATIALA</div><h1>Hearing & BLO Performance Dashboard</h1><p>Latest ECI + BLO reports • officer, supervisor, PS and hearing reports update automatically.</p></div><button className="ghost" onClick={()=>location.reload()}><RefreshCw size={16}/>Refresh</button></header>
@@ -233,13 +226,13 @@ export default function Page(){
 
     {tab==="overview"&&<><section className="panel"><div className="panelHead"><div><h2>Live Summary</h2><p>{data.length} PS currently loaded</p></div><div className="threshold">Underperformer threshold <input type="number" min="1" max="100" value={threshold} onChange={e=>setThreshold(Number(e.target.value)||50)}/>%</div></div><div className="progress"><div style={{width:Math.min(100,kpis.delivered?100*kpis.docs/kpis.delivered:0)+"%"}}/></div><div className="summaryline"><b>{kpis.delivered?pct(kpis.docs/kpis.delivered):"0.00%"}</b> document upload rate against delivered notices <span>{kpis.delivered} delivered</span></div></section><section className="panel"><div className="panelHead"><div><h2>Officer-wise performance</h2><p>Same officer names used in the source reports.</p></div></div><Table rows={officerSummary} cols={["officer","ps","held","hearingPct","scheduled","delivered","docs","pct"]}/></section></>}
 
-    {tab==="ps"&&<section className="panel"><h2>PS-wise Documents Uploaded by BLO</h2><Table rows={filtered} cols={["ps","officer","blo","supervisor","delivered","docs","pct","date","status"]}/></section>}
+    {tab==="ps"&&<section className="panel"><h2>PS-wise Documents Uploaded by BLO</h2><Table rows={filtered} cols={["ps","officer","officerContact","blo","bloContact","supervisor","supervisorContact","delivered","docs","pct","date","status"]}/></section>}
 
     {tab==="officer"&&<section className="panel"><div className="panelHead"><div><h2>Officer-wise performance</h2><p>Download the same officer-wise PDF reports as the source format.</p></div><select value={currentOfficer} onChange={e=>setSelectedOfficer(e.target.value)}>{officers.map(o=><option key={o}>{o}</option>)}</select></div><Table rows={officerSummary.filter(r=>String(r.officer).toLowerCase().includes(query.toLowerCase()))} cols={["officer","ps","held","hearingPct","scheduled","delivered","docs","pct"]}/><div className="reportActions"><button className="download" onClick={()=>exportOfficerHearing(currentOfficer)}><Download size={15}/> Selected Officer — Hearing Held PDF</button><button className="download" onClick={()=>exportOfficerUnder(currentOfficer)}><Download size={15}/> Selected Officer — Underperformance PDF</button><button className="download" onClick={()=>downloadZip("hearing")}><FileArchive size={15}/> All Officer Hearing PDFs (ZIP)</button><button className="download" onClick={()=>downloadZip("under")}><FileArchive size={15}/> All Officer Underperformance PDFs (ZIP)</button></div></section>}
 
-    {tab==="underperformer"&&<section className="panel"><div className="panelHead"><div><h2>Underperformer BLO / PS — Hearing Already Held</h2><p>Restricted to hearing-held PS with at least one notice delivered, matching the source report logic.</p></div><div className="reportActions"><button className="download" onClick={()=>exportOfficerUnder(currentOfficer)}><Download size={15}/> Current Officer PDF</button><button className="download" onClick={()=>downloadZip("under")}><FileArchive size={15}/> All Officers ZIP</button></div></div><Table rows={underperformers.filter(r=>Object.values(r).join(" ").toLowerCase().includes(query.toLowerCase()))} cols={["ps","officer","blo","supervisor","generated","delivered","pct","docs","date"]}/></section>}
+    {tab==="underperformer"&&<section className="panel"><div className="panelHead"><div><h2>Underperformer BLO / PS — Hearing Already Held</h2><p>Restricted to hearing-held PS with at least one notice delivered, matching the source report logic.</p></div><div className="reportActions"><button className="download" onClick={()=>exportOfficerUnder(currentOfficer)}><Download size={15}/> Current Officer PDF</button><button className="download" onClick={()=>downloadZip("under")}><FileArchive size={15}/> All Officers ZIP</button></div></div><Table rows={underperformers.filter(r=>Object.values(r).join(" ").toLowerCase().includes(query.toLowerCase()))} cols={["ps","officer","officerContact","blo","bloContact","supervisor","supervisorContact","generated","delivered","pct","docs","date"]}/></section>}
 
-    {tab==="hearing"&&<section className="panel"><div className="panelHead"><div><h2>Hearing Completed — Officer / PS Wise</h2><p>Same part-wise structure as the uploaded Hearing Held reports.</p></div><div className="reportActions"><button className="download" onClick={()=>exportOfficerHearing(currentOfficer)}><Download size={15}/> Current Officer PDF</button><button className="download" onClick={()=>downloadZip("hearing")}><FileArchive size={15}/> All Officers ZIP</button></div></div><Table rows={hearingRows.filter(r=>Object.values(r).join(" ").toLowerCase().includes(query.toLowerCase()))} cols={["ps","officer","blo","supervisor","generated","scheduled","delivered","docs","pct","date","status"]}/></section>}
+    {tab==="hearing"&&<section className="panel"><div className="panelHead"><div><h2>Hearing Completed — Officer / PS Wise</h2><p>Same part-wise structure as the uploaded Hearing Held reports.</p></div><div className="reportActions"><button className="download" onClick={()=>exportOfficerHearing(currentOfficer)}><Download size={15}/> Current Officer PDF</button><button className="download" onClick={()=>downloadZip("hearing")}><FileArchive size={15}/> All Officers ZIP</button></div></div><Table rows={hearingRows.filter(r=>Object.values(r).join(" ").toLowerCase().includes(query.toLowerCase()))} cols={["ps","officer","officerContact","blo","bloContact","supervisor","supervisorContact","generated","scheduled","delivered","docs","pct","date","status"]}/></section>}
 
     <section className="exports"><h2>Reports & PDFs</h2><button onClick={exportDocs}><Download/>PS-wise BLO Documents</button><button onClick={()=>exportOfficerUnder(currentOfficer)}><Download/>Underperformance — Current Officer</button><button onClick={()=>exportOfficerHearing(currentOfficer)}><Download/>Hearing Held — Current Officer</button><button onClick={()=>downloadZip("under")}><FileArchive/>All Underperformance PDFs ZIP</button><button onClick={()=>downloadZip("hearing")}><FileArchive/>All Hearing Held PDFs ZIP</button></section>
     {loading&&<div className="loading">Reading Excel…</div>}
@@ -247,5 +240,5 @@ export default function Page(){
 }
 
 function Table({rows,cols}:{rows:any[],cols:string[]}){
-  return <div className="tableWrap"><table><thead><tr>{cols.map(c=><th key={c}>{(({pct:"Upload %",hearingPct:"Hearing %",generated:"Notice Generated",delivered:"Notice Delivered",docs:"Docs Uploaded",scheduled:"Hearing Sched. (NM)",ps:"PS"}) as any)[c]||c}</th>)}</tr></thead><tbody>{rows.slice(0,1000).map((r,i)=><tr key={i}>{cols.map(c=>{const v=r[c];const isP=c==="pct"||c==="hearingPct";const n=Number(v||0);return <td className={isP?(n<.5?"bad":n<.75?"warn":"good"):c==="status"&&r.held?"good":""} key={c}>{isP?pct(n):String(v??"")}</td>})}</tr>)}</tbody></table>{rows.length>1000&&<div className="muted">Showing first 1000 matching records.</div>}</div>
+  return <div className="tableWrap"><table><thead><tr>{cols.map(c=><th key={c}>{(({pct:"Upload %",hearingPct:"Hearing %",generated:"Notice Generated",delivered:"Notice Delivered",docs:"Docs Uploaded",scheduled:"Hearing Sched. (NM)",ps:"PS",officer:"Officer Name",officerContact:"Officer Contact",blo:"BLO Name",bloContact:"BLO Contact",supervisor:"Supervisor Name",supervisorContact:"Supervisor Contact",held:"Hearing Held"}) as any)[c]||c}</th>)}</tr></thead><tbody>{rows.slice(0,1000).map((r,i)=><tr key={i}>{cols.map(c=>{const v=r[c];const isP=c==="pct"||c==="hearingPct";const n=Number(v||0);return <td className={isP?(n<.5?"bad":n<.75?"warn":"good"):c==="status"&&r.held?"good":""} key={c}>{isP?pct(n):String(v??"")}</td>})}</tr>)}</tbody></table>{rows.length>1000&&<div className="muted">Showing first 1000 matching records.</div>}</div>
 }
