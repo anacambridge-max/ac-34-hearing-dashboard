@@ -144,7 +144,10 @@ export default function Page(){
   const [tab,setTab]=useState("overview");
   const [threshold,setThreshold]=useState(50);
   const [selectedOfficer,setSelectedOfficer]=useState("");
-  const [loading,setLoading]=useState(false);\n  const [masterSheets,setMasterSheets]=useState<RawSheet[]>([]);\n  const [masterName,setMasterName]=useState("");\n  const [masterTab,setMasterTab]=useState("");
+  const [loading,setLoading]=useState(false);
+  const [masterSheets,setMasterSheets]=useState<RawSheet[]>([]);
+  const [masterName,setMasterName]=useState("");
+  const [masterTab,setMasterTab]=useState("");
 
   const ingest=async(setter:(r:Row[])=>void,setName:(s:string)=>void,e:React.ChangeEvent<HTMLInputElement>,type:"eci"|"blo")=>{
     const file=e.target.files?.[0];if(!file)return;
