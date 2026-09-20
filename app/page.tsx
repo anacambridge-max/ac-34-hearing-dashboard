@@ -27,7 +27,7 @@ function findKey(row:Row,names:string[]){
   return "";
 }
 function val(row:Row,names:string[]){const k=findKey(row,names);return k?row[k]:""}
-function splitPerson(v:any){
+function person(row:Row,nameNames:string[],contactNames:string[]){const p=splitPerson(val(row,nameNames));const contact=norm(val(row,contactNames));return {name:p.name,contact:p.contact||contact}}\n\nfunction splitPerson(v:any){
   const s=norm(v);
   const m=s.match(/\(\s*([^()]+?)\s*\)\s*$/);
   if(!m)return {name:s,contact:""};
@@ -105,6 +105,8 @@ function savePdf(doc:jsPDF,name:string){doc.save(name)}
 export default function Page(){
   const [eci,setEci]=useState<Row[]>([]);
   const [blo,setBlo]=useState<Row[]>([]);
+  const [eciSheets,setEciSheets]=useState<Sheet[]>([]);
+  const [bloSheets,setBloSheets]=useState<Sheet[]>([]);
   const [eciName,setEciName]=useState("");
   const [bloName,setBloName]=useState("");
   const [query,setQuery]=useState("");
@@ -116,33 +118,38 @@ export default function Page(){
   const ingest=async(setter:(r:Row[])=>void,setName:(s:string)=>void,e:React.ChangeEvent<HTMLInputElement>,type:"eci"|"blo")=>{
     const file=e.target.files?.[0];if(!file)return;
     setLoading(true);
-    try{const sheets=await parseWorkbook(file);const chosen=chooseSheet(sheets,type);setter(chosen.rows);setName(file.name);}
+    try{const sheets=await parseWorkbook(file);const chosen=chooseSheet(sheets,type);setter(chosen.rows);setName(file.name);if(type==="eci")setEciSheets(sheets);else setBloSheets(sheets);}
     finally{setLoading(false);}
   };
 
   const data=useMemo(()=>{
-    const eciRows=eci.map(r=>{
-      const op=splitPerson(val(r,["Officer Name","Officer"]));
-      const bp=splitPerson(val(r,["BLO Name","BLO Name ","BLO"]));
-      const sp=splitPerson(val(r,["BLO Supervisor Name","Supervisor Name","Supervisor"]));
-      return {ps:norm(val(r,["PS No","Part No","Part Number","Part"])),officer:op.name,officerContact:op.contact,blo:bp.name,bloContact:bp.contact,supervisor:sp.name,supervisorContact:sp.contact,centre:norm(val(r,["Hearing Centre","Centre"])),generated:num(val(r,["Notice Generated (NO MAP + ANOMALLY)","Notice Generated","NO MAPPING NOTICE GENERATED","Generated"])),scheduled:num(val(r,["Hearing Notice Scheduled NO MAPPING","Hearing Notice Sched. (NM)","Hearing Notice Scheduled","Scheduled"])),delivered:num(val(r,["Notice Delivered","NO MAP NOTICE DELIVERED","Delivered"])),docs:num(val(r,["Documents Uploaded by BLO","Docs Uploaded"])),date:norm(val(r,["Hearing Date(s)","Hearing Date","Date"])),status:norm(val(r,["Hearing Status","Status"]))};
-    });
-    const bloRows=blo.map(r=>{
-      const op=splitPerson(val(r,["Officer (lookup)","Officer Name","Officer"]));
-      const bp=splitPerson(val(r,["BLO Name","BLO"]));
-      const sp=splitPerson(val(r,["Supervisor (lookup)","Supervisor Name","Supervisor"]));
-      return {ps:norm(val(r,["PS No","Part No","Part Number"])),officer:op.name,officerContact:op.contact,blo:bp.name,bloContact:bp.contact,supervisor:sp.name,supervisorContact:sp.contact,centre:norm(val(r,["Hearing Centre","Centre"])),generated:0,scheduled:num(val(r,["Hearing Notice Scheduled","Hearing Notice Sched. (NM)","Scheduled"])),delivered:num(val(r,["Notice Delivered","Delivered"])),docs:num(val(r,["Documents Uploaded by BLO","Docs Uploaded"])),date:"",status:""};
-    });
-    const m=new Map<string,any>();
-    [...eciRows,...bloRows].forEach(r=>{
-      if(!r.ps)return;
-      const x=m.get(r.ps)||{ps:r.ps,officer:"",officerContact:"",blo:"",bloContact:"",supervisor:"",supervisorContact:"",centre:"",generated:0,scheduled:0,delivered:0,docs:0,date:"",status:""};
-      x.officer=x.officer||r.officer;x.officerContact=x.officerContact||r.officerContact;x.blo=x.blo||r.blo;x.bloContact=x.bloContact||r.bloContact;x.supervisor=x.supervisor||r.supervisor;x.supervisorContact=x.supervisorContact||r.supervisorContact;x.centre=x.centre||r.centre;
-      x.generated=x.generated||r.generated;x.scheduled=x.scheduled||r.scheduled;x.delivered=x.delivered||r.delivered;x.docs=Math.max(x.docs||0,r.docs||0);
-      x.date=x.date||r.date;x.status=x.status||r.status;m.set(r.ps,x);
-    });
-    return [...m.values()].map(x=>({...x,pct:x.delivered?x.docs/x.delivered:0,held:/hearing\s*held|completed|complete/i.test(x.status)})).sort((a,b)=>Number(a.ps)-Number(b.ps));
-  },[eci,blo]);
+     const identityRows=[...eciSheets,...bloSheets].flatMap(s=>s.rows);
+     const identityMap=new Map<string,any>();
+     identityRows.forEach(r=>{
+       const ps=norm(val(r,["PS No","PS Number","Part No","Part Number","Part"]));if(!ps)return;
+       const op=person(r,["Officer Name","Officer (lookup)","Officer"],["Officer Contact","Officer Contact No","Officer Mobile","Officer Phone","Officer Mobile No"]);
+       const bp=person(r,["BLO Name","BLO"],["BLO Contact","BLO Contact No","BLO Mobile","BLO Phone","BLO Mobile No"]);
+       const sp=person(r,["BLO Supervisor Name","Supervisor Name","Supervisor (lookup)","Supervisor"],["Supervisor Contact","Supervisor Contact No","Supervisor Mobile","Supervisor Phone","Supervisor Mobile No"]);
+       if(op.name||bp.name||sp.name){const x=identityMap.get(ps)||{};x.officer=x.officer||op.name;x.officerContact=x.officerContact||op.contact;x.blo=x.blo||bp.name;x.bloContact=x.bloContact||bp.contact;x.supervisor=x.supervisor||sp.name;x.supervisorContact=x.supervisorContact||sp.contact;identityMap.set(ps,x)}
+     });
+     const eciRows=eci.map(r=>{
+       const ps=norm(val(r,["PS No","PS Number","Part No","Part Number","Part"]));const id=identityMap.get(ps)||{};
+       const op=person(r,["Officer Name","Officer (lookup)","Officer"],["Officer Contact","Officer Contact No","Officer Mobile","Officer Phone","Officer Mobile No"]);
+       const bp=person(r,["BLO Name","BLO"],["BLO Contact","BLO Contact No","BLO Mobile","BLO Phone","BLO Mobile No"]);
+       const sp=person(r,["BLO Supervisor Name","Supervisor Name","Supervisor (lookup)","Supervisor"],["Supervisor Contact","Supervisor Contact No","Supervisor Mobile","Supervisor Phone","Supervisor Mobile No"]);
+       return {ps,officer:op.name||id.officer||"",officerContact:op.contact||id.officerContact||"",blo:bp.name||id.blo||"",bloContact:bp.contact||id.bloContact||"",supervisor:sp.name||id.supervisor||"",supervisorContact:sp.contact||id.supervisorContact||"",centre:norm(val(r,["Hearing Centre","Centre"])),generated:num(val(r,["Notice Generated (NO MAP + ANOMALLY)","Notice Generated","NO MAPPING NOTICE GENERATED","Generated"])),scheduled:num(val(r,["Hearing Notice Scheduled NO MAPPING","Hearing Notice Sched. (NM)","Hearing Notice Scheduled","Scheduled"])),delivered:num(val(r,["Notice Delivered","NO MAP NOTICE DELIVERED","Delivered"])),docs:num(val(r,["Documents Uploaded by BLO","Docs Uploaded"])),date:dateText(val(r,["Hearing Date(s)","Hearing Date","Date of Hearing","Hearing Date & Time"])),status:norm(val(r,["Hearing Status","Hearing Held","Status"]))};
+     });
+     const bloRows=blo.map(r=>{
+       const ps=norm(val(r,["PS No","PS Number","Part No","Part Number","Part"]));const id=identityMap.get(ps)||{};
+       const op=person(r,["Officer (lookup)","Officer Name","Officer"],["Officer Contact","Officer Contact No","Officer Mobile","Officer Phone","Officer Mobile No"]);
+       const bp=person(r,["BLO Name","BLO"],["BLO Contact","BLO Contact No","BLO Mobile","BLO Phone","BLO Mobile No"]);
+       const sp=person(r,["Supervisor (lookup)","BLO Supervisor Name","Supervisor Name","Supervisor"],["Supervisor Contact","Supervisor Contact No","Supervisor Mobile","Supervisor Phone","Supervisor Mobile No"]);
+       return {ps,officer:op.name||id.officer||"",officerContact:op.contact||id.officerContact||"",blo:bp.name||id.blo||"",bloContact:bp.contact||id.bloContact||"",supervisor:sp.name||id.supervisor||"",supervisorContact:sp.contact||id.supervisorContact||"",centre:norm(val(r,["Hearing Centre","Centre"])),generated:0,scheduled:num(val(r,["Hearing Notice Scheduled","Hearing Notice Sched. (NM)","Scheduled"])),delivered:num(val(r,["Notice Delivered","Delivered"])),docs:num(val(r,["Documents Uploaded by BLO","Docs Uploaded"])),date:"",status:""};
+     });
+     const m=new Map<string,any>();
+     [...eciRows,...bloRows].forEach(r=>{if(!r.ps)return;const x=m.get(r.ps)||{ps:r.ps,officer:"",officerContact:"",blo:"",bloContact:"",supervisor:"",supervisorContact:"",centre:"",generated:0,scheduled:0,delivered:0,docs:0,date:"",status:""};x.officer=x.officer||r.officer;x.officerContact=x.officerContact||r.officerContact;x.blo=x.blo||r.blo;x.bloContact=x.bloContact||r.bloContact;x.supervisor=x.supervisor||r.supervisor;x.supervisorContact=x.supervisorContact||r.supervisorContact;x.centre=x.centre||r.centre;x.generated=x.generated||r.generated;x.scheduled=x.scheduled||r.scheduled;x.delivered=x.delivered||r.delivered;x.docs=Math.max(x.docs||0,r.docs||0);x.date=x.date||r.date;x.status=x.status||r.status;m.set(r.ps,x)});
+     return [...m.values()].map(x=>({...x,pct:x.delivered?x.docs/x.delivered:0,held:/hearing\\s*held|completed|complete|concluded|disposed|^1(?:\\.0)?$|^yes$/i.test(norm(x.status))})).sort((a,b)=>Number(a.ps)-Number(b.ps));
+   },[eci,blo,eciSheets,bloSheets]);
 
   const officers=useMemo(()=>[...new Set(data.map(r=>r.officer).filter(Boolean))].sort(),[data]);
   const currentOfficer=selectedOfficer||officers[0]||"";
