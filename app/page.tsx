@@ -31,7 +31,21 @@ function val(row:Row,names:string[]){const k=findKey(row,names);return k?row[k]:
 async function parseWorkbook(file:File):Promise<Sheet[]>{
   const buf=await file.arrayBuffer();
   const wb=XLSX.read(buf,{type:"array",cellDates:true});
-  return wb.SheetNames.map(name=>({name,rows:XLSX.utils.sheet_to_json<Row>(wb.Sheets[name],{defval:""})}));
+  return wb.SheetNames.map(name=>{
+    const matrix:any[][]=XLSX.utils.sheet_to_json<any[]>(wb.Sheets[name],{header:1,defval:""});
+    let headerIndex=0,best=-1;
+    matrix.slice(0,12).forEach((row,i)=>{
+      const text=row.map((x:any)=>keyNorm(x)).join(" ");
+      const score=(/psno|partno|partnumber/.test(text)?3:0)+(/officername|officerlookup|officer/.test(text)?2:0)+(/supervisorname|supervisorlookup|supervisor/.test(text)?2:0)+(/documentsuploadedbyblo/.test(text)?4:0)+(/hearingstatus/.test(text)?3:0)+(/noticedelivered/.test(text)?2:0)+(/noticegenerated/.test(text)?2:0);
+      if(score>best){best=score;headerIndex=i}
+    });
+    const rawHeader=matrix[headerIndex]||[];
+    const headers=rawHeader.map((h:any,i:number)=>norm(h)||`Column ${i+1}`);
+    const rows=matrix.slice(headerIndex+1).filter(r=>r.some((x:any)=>norm(x))).map(r=>{
+      const o:Row={};headers.forEach((h:string,i:number)=>o[h]=r[i]??"");return o;
+    });
+    return {name,rows};
+  });
 }
 function scoreSheet(s:Sheet,type:"eci"|"blo"){
   const sample=s.rows[0]||{};
