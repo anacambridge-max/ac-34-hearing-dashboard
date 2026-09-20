@@ -29,7 +29,7 @@ function findKey(row:Row,names:string[]){
 function val(row:Row,names:string[]){const k=findKey(row,names);return k?row[k]:""}
 function splitPerson(v:any){
   const s=norm(v);
-  const m=s.match(/\\(\\s*([^()]+?)\\s*\\)\\s*$/);
+  const m=s.match(/\(\s*([^()]+?)\s*\)\s*$/);
   if(!m)return {name:s,contact:""};
   return {name:s.slice(0,m.index).trim(),contact:m[1].trim()};
 }
@@ -61,7 +61,7 @@ function scoreSheet(s:Sheet,type:"eci"|"blo"){
   return (ks.includes("partno")?35:0)+(ks.includes("hearingstatus")?35:0)+(ks.includes("officername")?20:0)+(ks.includes("bloname")?20:0)+(ks.includes("blosupervisorname")?20:0)+(ks.includes("noticedelivered")?15:0)+(ks.includes("noticegenerated")?10:0)+(ks.includes("hearingdates")?10:0)+Math.min(10,Math.floor(s.rows.length/100));
 }
 function chooseSheet(sheets:Sheet[],type:"eci"|"blo"){
-  return [...sheets].sort((a,b)=>scoreSheet(b,type)-scoreSheet(a,type))[0]||{name:"",rows:[]};
+  return [...sheets].sort((a,b)=>scoreSheet(b,type)-scoreSheet(a,type))[0]||{name:"",rows:[],headers:[]};
 }
 function pct(v:number){return (v*100).toFixed(2)+"%"}
 function dateText(v:any){
