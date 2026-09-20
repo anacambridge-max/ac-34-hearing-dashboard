@@ -1,65 +1,237 @@
 "use client";
+
 import {useMemo,useState} from "react";
 import * as XLSX from "xlsx";
-import {FileSpreadsheet,Upload,RefreshCw,Download,Users,FileCheck2,CalendarCheck,AlertTriangle,Search} from "lucide-react";
+import JSZip from "jszip";
+import {FileSpreadsheet,Upload,RefreshCw,Download,Users,FileCheck2,CalendarCheck,AlertTriangle,Search,FileArchive} from "lucide-react";
 import {jsPDF} from "jspdf";
 import autoTable from "jspdf-autotable";
 
 type Row=Record<string,any>;
+type Sheet={name:string;rows:Row[]};
+
 const norm=(v:any)=>String(v??"").trim();
 const num=(v:any)=>{const n=Number(v);return Number.isFinite(n)?n:0};
-function findKey(row:Row,names:string[]){const keys=Object.keys(row);const low=keys.map(k=>k.toLowerCase().replace(/[^a-z0-9]/g,""));for(const n of names){const x=n.toLowerCase().replace(/[^a-z0-9]/g,"");const i=low.findIndex(k=>k===x||k.includes(x));if(i>=0)return keys[i]}return ""}
+const keyNorm=(v:any)=>norm(v).toLowerCase().replace(/[^a-z0-9]/g,"");
 
-function parseWorkbook(file:File){return file.arrayBuffer().then(buf=>{const wb=XLSX.read(buf,{type:"array",cellDates:true});return wb.SheetNames.map(name=>({name,rows:XLSX.utils.sheet_to_json<Row>(wb.Sheets[name],{defval:""})}))})}
-
-function downloadPdf(title:string,headers:string[],rows:any[][],filename:string){
- const doc=new jsPDF({orientation:headers.length>6?"landscape":"portrait",unit:"mm",format:"a4"});
- doc.setFontSize(16);doc.text(title,14,15);doc.setFontSize(8);doc.text("Generated: "+new Date().toLocaleString("en-IN"),14,21);
- autoTable(doc,{startY:26,head:[headers],body:rows.map(r=>r.map(x=>String(x??""))),styles:{fontSize:7,cellPadding:2},headStyles:{fillColor:[23,54,93]},alternateRowStyles:{fillColor:[242,242,242]}});
- doc.save(filename);
+function findKey(row:Row,names:string[]){
+  const keys=Object.keys(row);
+  const exact=new Map(keys.map(k=>[keyNorm(k),k]));
+  for(const n of names){const k=exact.get(keyNorm(n));if(k)return k}
+  for(const n of names){
+    const x=keyNorm(n);
+    if(x.length<5) continue;
+    const k=keys.find(k=>keyNorm(k).includes(x));
+    if(k)return k;
+  }
+  return "";
 }
+function val(row:Row,names:string[]){const k=findKey(row,names);return k?row[k]:""}
+
+async function parseWorkbook(file:File):Promise<Sheet[]>{
+  const buf=await file.arrayBuffer();
+  const wb=XLSX.read(buf,{type:"array",cellDates:true});
+  return wb.SheetNames.map(name=>({name,rows:XLSX.utils.sheet_to_json<Row>(wb.Sheets[name],{defval:""})}));
+}
+function scoreSheet(s:Sheet,type:"eci"|"blo"){
+  const sample=s.rows[0]||{};
+  const ks=Object.keys(sample).map(keyNorm).join(" ");
+  if(type==="blo"){
+    return (ks.includes("documentsuploadedbyblo")?50:0)+(ks.includes("psno")?25:0)+(ks.includes("officerlookup")?15:0)+(ks.includes("supervisorlookup")?10:0);
+  }
+  return (ks.includes("partno")?30:0)+(ks.includes("hearingstatus")?25:0)+(ks.includes("officername")?15:0)+(ks.includes("noticedelivered")?15:0)+(ks.includes("noticegenerated")?10:0)+(ks.includes("hearingdates")?5:0);
+}
+function chooseSheet(sheets:Sheet[],type:"eci"|"blo"){
+  return [...sheets].sort((a,b)=>scoreSheet(b,type)-scoreSheet(a,type))[0]||{name:"",rows:[]};
+}
+function pct(v:number){return (v*100).toFixed(2)+"%"}
+function dateText(v:any){
+  if(v instanceof Date && !isNaN(v.getTime())) return v.toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"}).replaceAll(" ","-");
+  return norm(v);
+}
+function filenameSafe(v:string){return v.replace(/[^a-z0-9._-]+/gi,"_").replace(/^_+|_+$/g,"")}
+
+function makePdf(title:string,meta:string,headers:string[],rows:any[][],opts:{landscape?:boolean;redHeader?:boolean;percentCols?:number[];statusCol?:number;total?:any[]}={}){
+  const doc=new jsPDF({orientation:opts.landscape===false?"portrait":"landscape",unit:"mm",format:"a4"});
+  const navy=[31,56,100] as [number,number,number], red=[174,0,0] as [number,number,number], green=[198,239,206] as [number,number,number], lightRed=[252,221,221] as [number,number,number];
+  doc.setTextColor(...navy);doc.setFontSize(16);doc.setFont("helvetica","bold");doc.text(title,14,14);
+  doc.setFontSize(8);doc.setFont("helvetica","bold");doc.text(meta,14,21);
+  autoTable(doc,{
+    startY:25,head:[headers],body:rows.map(r=>r.map(x=>String(x??""))),
+    theme:"grid",
+    styles:{fontSize:7,cellPadding:1.7,lineColor:[205,205,205],lineWidth:.15,textColor:[25,25,25],valign:"middle"},
+    headStyles:{fillColor:opts.redHeader?red:navy,textColor:[255,255,255],fontStyle:"bold",halign:"center"},
+    alternateRowStyles:{fillColor:[247,247,247]},
+    didParseCell:(d:any)=>{
+      if(d.section==="body" && opts.percentCols?.includes(d.column.index)){
+        const raw=String(d.cell.raw??"").replace("%","");
+        const n=parseFloat(raw);
+        d.cell.styles.fillColor=n<50?lightRed:n<75?[255,242,204]:[198,239,206];
+      }
+      if(d.section==="body" && opts.statusCol!==undefined && d.column.index===opts.statusCol){
+        d.cell.styles.fillColor=green;
+        d.cell.styles.halign="center";
+      }
+    }
+  });
+  if(opts.total){
+    const y=(doc as any).lastAutoTable.finalY+3;
+    autoTable(doc,{startY:y,body:[opts.total.map(x=>String(x??""))],theme:"grid",styles:{fontSize:7,fontStyle:"bold",fillColor:[255,192,0],cellPadding:1.8},columnStyles:Object.fromEntries(headers.map((_,i)=>[i,{halign:i===0?"left":"center"}]))});
+  }
+  return doc;
+}
+function savePdf(doc:jsPDF,name:string){doc.save(name)}
 
 export default function Page(){
- const [eci,setEci]=useState<Row[]>([]),[blo,setBlo]=useState<Row[]>([]),[eciName,setEciName]=useState(""),[bloName,setBloName]=useState("");
- const [query,setQuery]=useState(""),[tab,setTab]=useState("overview"),[threshold,setThreshold]=useState(50);
- const [loading,setLoading]=useState(false);
- const ingest=async(setter:any,setName:any,e:any)=>{
-   const f=e.target.files?.[0]; if(!f)return;
-   setLoading(true);
-   try{const sheets=await parseWorkbook(f);const preferred=sheets.find(s=>/eci|part|officer/i.test(s.name))||sheets[0];setter(preferred.rows);setName(f.name)}
-   finally{setLoading(false)}
- };
- const data=useMemo(()=>{
-   const pmEci:any[]=eci.map(r=>({ps:norm(r[findKey(r,["PS No","Part No","Part Number","PS"])]),officer:norm(r[findKey(r,["Officer Name","Officer"])]),blo:norm(r[findKey(r,["BLO Name","BLO"])]),supervisor:norm(r[findKey(r,["Supervisor Name","Supervisor"])]),scheduled:num(r[findKey(r,["Hearing Notice Scheduled","Scheduled","Notice Scheduled"])]),generated:num(r[findKey(r,["Total No Mapping Notices Generated","Notice Generated","Generated"])]),delivered:num(r[findKey(r,["Total No Mapping Notices Delivered","Notice Delivered","Delivered"])])}));
-   const pmBlo:any[]=blo.map(r=>({ps:norm(r[findKey(r,["PS No","Part No","Part Number","PS"])]),docs:num(r[findKey(r,["Documents Uploaded by BLO","Documents Uploaded","BLO Documents","Docs Uploaded"])]),scheduled:num(r[findKey(r,["Hearing Notice Scheduled","Scheduled"])]),officer:norm(r[findKey(r,["Officer Name","Officer"])]),blo:norm(r[findKey(r,["BLO Name","BLO"])]),supervisor:norm(r[findKey(r,["Supervisor Name","Supervisor"])]),status:norm(r[findKey(r,["Hearing Status","Status"])]),date:norm(r[findKey(r,["Hearing Date","Date"])]),centre:norm(r[findKey(r,["Hearing Centre","Centre"])] )}));
-   const byPs=new Map<string,any>();
-   [...pmEci,...pmBlo].forEach(r=>{if(!r.ps)return;const x=byPs.get(r.ps)||{ps:r.ps,officer:r.officer,blo:r.blo,supervisor:r.supervisor,generated:r.generated||0,delivered:r.delivered||0,scheduled:r.scheduled||0,docs:0,status:r.status,date:r.date,centre:r.centre};Object.assign(x,{officer:x.officer||r.officer,blo:x.blo||r.blo,supervisor:x.supervisor||r.supervisor,generated:x.generated||r.generated||0,delivered:x.delivered||r.delivered||0,scheduled:x.scheduled||r.scheduled||0,status:x.status||r.status,date:x.date||r.date,centre:x.centre||r.centre,docs:Math.max(x.docs||0,r.docs||0)});byPs.set(r.ps,x)});
-   return [...byPs.values()].map(x=>({...x,pct:x.scheduled?x.docs/x.scheduled:0,under:x.scheduled>0&&x.docs/x.scheduled<threshold/100,held:/held|completed|complete/i.test(x.status)}));
- },[eci,blo,threshold]);
- const filtered=data.filter(r=>Object.values(r).join(" ").toLowerCase().includes(query.toLowerCase()));
- const kpis={ps:data.length,generated:data.reduce((a,r)=>a+r.generated,0),delivered:data.reduce((a,r)=>a+r.delivered,0),docs:data.reduce((a,r)=>a+r.docs,0),held:data.filter(r=>r.held).length,under:data.filter(r=>r.under).length,scheduled:data.reduce((a,r)=>a+r.scheduled,0)};
- const officer=useMemo(()=>{const m=new Map<string,any>();data.forEach(r=>{const k=r.officer||"Unmapped";const x=m.get(k)||{officer:k,ps:0,held:0,docs:0,scheduled:0};x.ps++;if(r.held)x.held++;x.docs+=r.docs;x.scheduled+=r.scheduled;m.set(k,x)});return [...m.values()].map(x=>({...x,pct:x.scheduled?x.docs/x.scheduled:0,hearingPct:x.ps?x.held/x.ps:0})).sort((a,b)=>b.pct-a.pct)},[data]);
- const under=data.filter(r=>r.under);
- const exportUnder=()=>downloadPdf("AC-34 MATIALA — UNDERPERFORMER BLO REPORT",["PS","BLO","Officer","Supervisor","Scheduled","Docs","Upload %"],under.map(r=>[r.ps,r.blo,r.officer,r.supervisor,r.scheduled,r.docs,(r.pct*100).toFixed(1)+"%"]),"Underperformer_BLO.pdf");
- const exportOfficer=()=>downloadPdf("AC-34 MATIALA — OFFICER-WISE HEARING COMPLETED",["Officer","PS Count","Held","Hearing %","Docs","Scheduled"],officer.map(r=>[r.officer,r.ps,r.held,(r.hearingPct*100).toFixed(1)+"%",r.docs,r.scheduled]),"Officer_Wise_Hearing_Held.pdf");
- const exportPS=()=>downloadPdf("AC-34 MATIALA — OFFICER-WISE / PS-WISE HEARING COMPLETED",["Officer","PS","BLO","Supervisor","Hearing Date","Centre"],data.filter(r=>r.held).map(r=>[r.officer,r.ps,r.blo,r.supervisor,r.date,r.centre]),"Officer_PS_Wise_Hearing_Held.pdf");
- const exportDocs=()=>downloadPdf("AC-34 MATIALA — PS-WISE DOCUMENTS UPLOADED BY BLO",["PS","Documents Uploaded by BLO"],data.map(r=>[r.ps,r.docs]),"PS_Wise_BLO_Documents.pdf");
+  const [eci,setEci]=useState<Row[]>([]);
+  const [blo,setBlo]=useState<Row[]>([]);
+  const [eciName,setEciName]=useState("");
+  const [bloName,setBloName]=useState("");
+  const [query,setQuery]=useState("");
+  const [tab,setTab]=useState("overview");
+  const [threshold,setThreshold]=useState(50);
+  const [selectedOfficer,setSelectedOfficer]=useState("");
+  const [loading,setLoading]=useState(false);
 
- return <main>
-  <header><div><div className="eyebrow">SIR-2026 • AC-34 MATIALA</div><h1>Hearing & BLO Performance Dashboard</h1><p>Upload the latest ECI report and BLO document report. All views recalculate automatically.</p></div><button className="ghost" onClick={()=>location.reload()}><RefreshCw size={16}/>Refresh</button></header>
-  <section className="uploadGrid">
-   <label className="upload"><FileSpreadsheet/><span><b>Upload ECI Report</b><small>{eciName||"Excel / XLSX • Part / Officer data"}</small></span><input type="file" accept=".xlsx,.xls,.csv" onChange={e=>ingest(setEci,setEciName,e)}/><Upload/></label>
-   <label className="upload"><FileCheck2/><span><b>Upload BLO Documents Report</b><small>{bloName||"Excel / XLSX • PS + documents uploaded"}</small></span><input type="file" accept=".xlsx,.xls,.csv" onChange={e=>ingest(setBlo,setBloName,e)}/><Upload/></label>
-  </section>
-  <section className="toolbar"><div className="tabs">{["overview","ps","officer","underperformer","hearing"].map(t=><button className={tab===t?"active":""} onClick={()=>setTab(t)} key={t}>{t==="ps"?"PS Wise":t[0].toUpperCase()+t.slice(1)}</button>)}</div><div className="search"><Search size={16}/><input placeholder="Search PS, officer, BLO, supervisor..." value={query} onChange={e=>setQuery(e.target.value)}/></div></section>
-  <section className="kpis">{[["Total PS",kpis.ps,Users],["Notices Generated",kpis.generated,FileSpreadsheet],["Notices Delivered",kpis.delivered,FileCheck2],["BLO Documents",kpis.docs,FileCheck2],["Hearing Held",kpis.held,CalendarCheck],["Underperformer PS",kpis.under,AlertTriangle]].map(([label,value,Icon])=><div className="card" key={label as string}><Icon size={19}/><span>{label}</span><strong>{value as number}</strong></div>)}</section>
-  {tab==="overview"&&<><section className="panel"><div className="panelHead"><div><h2>Live Summary</h2><p>{data.length} PS currently loaded</p></div><div className="threshold">Underperformer threshold <input type="number" min="1" max="100" value={threshold} onChange={e=>setThreshold(Number(e.target.value)||50)}/>%</div></div><div className="progress"><div style={{width:Math.min(100,kpis.scheduled?100*kpis.docs/kpis.scheduled:0)+"%"}}/></div><div className="summaryline"><b>{kpis.scheduled?((100*kpis.docs/kpis.scheduled).toFixed(1)):0}%</b> document upload rate against scheduled hearing notices <span>{kpis.scheduled} scheduled</span></div></section><section className="panel"><h2>Officer-wise performance</h2><Table rows={officer} cols={["officer","ps","held","hearingPct","scheduled","docs","pct"]}/></section></>}
-  {tab==="ps"&&<section className="panel"><h2>PS-wise Documents Uploaded by BLO</h2><Table rows={filtered} cols={["ps","docs","scheduled","pct","officer","blo","supervisor"]}/></section>}
-  {tab==="officer"&&<section className="panel"><h2>Officer-wise performance</h2><Table rows={officer.filter(r=>String(r.officer).toLowerCase().includes(query.toLowerCase()))} cols={["officer","ps","held","hearingPct","scheduled","docs","pct"]}/></section>}
-  {tab==="underperformer"&&<section className="panel"><div className="panelHead"><div><h2>Underperformer BLO / PS</h2><p>Below {threshold}% documents uploaded against scheduled notices</p></div><button className="download" onClick={exportUnder}><Download size={15}/> PDF</button></div><Table rows={under.filter(r=>Object.values(r).join(" ").toLowerCase().includes(query.toLowerCase()))} cols={["ps","blo","officer","supervisor","scheduled","docs","pct"]}/></section>}
-  {tab==="hearing"&&<section className="panel"><div className="panelHead"><div><h2>Hearing Completed — Officer / PS Wise</h2><p>Records identified as Hearing Held / Completed</p></div><button className="download" onClick={exportPS}><Download size={15}/> PDF</button></div><Table rows={data.filter(r=>r.held)} cols={["officer","ps","blo","supervisor","date","centre","status"]}/></section>}
-  <section className="exports"><h2>Reports & PDFs</h2><button onClick={exportDocs}><Download/>PS-wise BLO Documents</button><button onClick={exportUnder}><Download/>Underperformer BLO</button><button onClick={exportOfficer}><Download/>Officer-wise Hearing Held</button><button onClick={exportPS}><Download/>Officer + PS-wise Hearing Held</button></section>
-  {loading&&<div className="loading">Reading Excel…</div>}
- </main>
+  const ingest=async(setter:(r:Row[])=>void,setName:(s:string)=>void,e:React.ChangeEvent<HTMLInputElement>,type:"eci"|"blo")=>{
+    const file=e.target.files?.[0];if(!file)return;
+    setLoading(true);
+    try{const sheets=await parseWorkbook(file);const chosen=chooseSheet(sheets,type);setter(chosen.rows);setName(file.name);}
+    finally{setLoading(false);}
+  };
+
+  const data=useMemo(()=>{
+    const eciRows=eci.map(r=>({
+      ps:norm(val(r,["PS No","Part No","Part Number","Part"])),
+      officer:norm(val(r,["Officer Name","Officer"])),
+      blo:norm(val(r,["BLO Name","BLO Name "])),
+      supervisor:norm(val(r,["BLO Supervisor Name","Supervisor Name","Supervisor"])),
+      centre:norm(val(r,["Hearing Centre","Centre"])),
+      generated:num(val(r,["Notice Generated (NO MAP + ANOMALLY)","Notice Generated","NO MAPPING NOTICE GENERATED","Generated"])),
+      scheduled:num(val(r,["Hearing Notice Scheduled NO MAPPING","Hearing Notice Sched. (NM)","Hearing Notice Scheduled","Scheduled"])),
+      delivered:num(val(r,["Notice Delivered","NO MAP NOTICE DELIVERED","Delivered"])),
+      docs:num(val(r,["Documents Uploaded by BLO","Docs Uploaded"])),
+      date:norm(val(r,["Hearing Date(s)","Hearing Date","Date"])),
+      status:norm(val(r,["Hearing Status","Status"]))
+    }));
+    const bloRows=blo.map(r=>({
+      ps:norm(val(r,["PS No","Part No","Part Number"])),
+      officer:norm(val(r,["Officer (lookup)","Officer Name","Officer"])),
+      blo:norm(val(r,["BLO Name","BLO"])),
+      supervisor:norm(val(r,["Supervisor (lookup)","Supervisor Name","Supervisor"])),
+      centre:norm(val(r,["Hearing Centre","Centre"])),
+      generated:0,scheduled:num(val(r,["Hearing Notice Scheduled","Hearing Notice Sched. (NM)","Scheduled"])),
+      delivered:num(val(r,["Notice Delivered","Delivered"])),
+      docs:num(val(r,["Documents Uploaded by BLO","Docs Uploaded"])),
+      date:"",status:""
+    }));
+    const m=new Map<string,any>();
+    [...eciRows,...bloRows].forEach(r=>{
+      if(!r.ps)return;
+      const x=m.get(r.ps)||{ps:r.ps,officer:"",blo:"",supervisor:"",centre:"",generated:0,scheduled:0,delivered:0,docs:0,date:"",status:""};
+      x.officer=x.officer||r.officer;x.blo=x.blo||r.blo;x.supervisor=x.supervisor||r.supervisor;x.centre=x.centre||r.centre;
+      x.generated=x.generated||r.generated;x.scheduled=x.scheduled||r.scheduled;x.delivered=x.delivered||r.delivered;x.docs=Math.max(x.docs||0,r.docs||0);
+      x.date=x.date||r.date;x.status=x.status||r.status;m.set(r.ps,x);
+    });
+    return [...m.values()].map(x=>({...x,pct:x.delivered?x.docs/x.delivered:0,held:/hearing\s*held|completed|complete/i.test(x.status)})).sort((a,b)=>Number(a.ps)-Number(b.ps));
+  },[eci,blo]);
+
+  const officers=useMemo(()=>[...new Set(data.map(r=>r.officer).filter(Boolean))].sort(),[data]);
+  const currentOfficer=selectedOfficer||officers[0]||"";
+  const officerData=data.filter(r=>r.officer===currentOfficer);
+  const filtered=data.filter(r=>Object.values(r).join(" ").toLowerCase().includes(query.toLowerCase()));
+
+  const officerSummary=useMemo(()=>officers.map(name=>{
+    const rows=data.filter(r=>r.officer===name);
+    const held=rows.filter(r=>r.held);
+    const scheduled=rows.reduce((a,r)=>a+r.scheduled,0),docs=rows.reduce((a,r)=>a+r.docs,0);
+    return {officer:name,ps:rows.length,held:held.length,scheduled,docs,pct:scheduled?docs/scheduled:0,hearingPct:rows.length?held.length/rows.length:0};
+  }),[data,officers]);
+
+  const kpis={ps:data.length,generated:data.reduce((a,r)=>a+r.generated,0),delivered:data.reduce((a,r)=>a+r.delivered,0),docs:data.reduce((a,r)=>a+r.docs,0),held:data.filter(r=>r.held).length,under:data.filter(r=>r.delivered>0&&r.pct<threshold/100).length,scheduled:data.reduce((a,r)=>a+r.scheduled,0)};
+
+  const underperformers=useMemo(()=>data.filter(r=>r.held&&r.delivered>0&&r.pct<threshold/100).sort((a,b)=>a.pct-b.pct),[data,threshold]);
+  const officerUnder=useMemo(()=>officerData.filter(r=>r.held&&r.delivered>0).sort((a,b)=>a.pct-b.pct).slice(0,5),[officerData]);
+  const supervisorUnder=useMemo(()=>{
+    const m=new Map<string,any>();
+    officerData.forEach(r=>{
+      const s=r.supervisor||"Unmapped";const x=m.get(s)||{supervisor:s,held:0,total:0,generated:0,delivered:0,docs:0,seenHeld:new Set<string>()};
+      x.total++;x.generated+=r.generated;x.delivered+=r.delivered;x.docs+=r.docs;
+      if(r.held)x.seenHeld.add(r.ps);m.set(s,x);
+    });
+    return [...m.values()].map(x=>({...x,held:x.seenHeld.size,pct:x.delivered?x.docs/x.delivered:0})).filter(x=>x.delivered>0).sort((a,b)=>a.pct-b.pct).slice(0,5);
+  },[officerData]);
+
+  const hearingRows=officerData.filter(r=>r.held).sort((a,b)=>Number(a.ps)-Number(b.ps));
+  const exportOfficerHearing=(name:string)=>{
+    const rows=data.filter(r=>r.officer===name&&r.held).sort((a,b)=>Number(a.ps)-Number(b.ps));
+    const body=rows.map((r,i)=>[i+1,r.ps,r.blo,r.supervisor,r.generated,r.scheduled,r.delivered,pct(r.delivered?r.delivered/r.scheduled:0),r.docs,pct(r.delivered?r.docs/r.delivered:0),r.date,"Hearing Held"]);
+    const totals=["TOTAL","","","",rows.reduce((a,r)=>a+r.generated,0),rows.reduce((a,r)=>a+r.scheduled,0),rows.reduce((a,r)=>a+r.delivered,0),pct(rows.reduce((a,r)=>a+r.delivered,0)/Math.max(1,rows.reduce((a,r)=>a+r.scheduled,0))),rows.reduce((a,r)=>a+r.docs,0),pct(rows.reduce((a,r)=>a+r.docs,0)/Math.max(1,rows.reduce((a,r)=>a+r.delivered,0))),"",""];
+    const doc=makePdf("AC-34 MATIALA — SIR-2026 : PART WISE / PS WISE HEARING REPORT (HEARING ALREADY HELD)",`Officer: ${name}  |  Total Parts (PS): ${rows.length}  |  Report generated: ${new Date().toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"})}`,["S.No","Part No.","BLO Name","Supervisor Name","Notice Generated","Hearing Notice Sched. (NM)","Notice Delivered","% Notice Delivered","Docs Uploaded","% Docs Uploaded","Hearing Date(s)","Hearing Status"],body,{percentCols:[7,9],statusCol:11,total:totals});
+    const y=(doc as any).lastAutoTable.finalY+10;doc.setFontSize(8);doc.setTextColor(70);doc.text(`Hearing Held: ${rows.length}  |  Hearing Pending: 0  |  Partially Held: 0  |  No Hearing Scheduled: 0`,14,y);
+    savePdf(doc,`${filenameSafe(name)}_Part_Wise_Report_HearingHeld.pdf`);
+  };
+  const exportOfficerUnder=(name:string)=>{
+    const rows=data.filter(r=>r.officer===name&&r.held&&r.delivered>0).sort((a,b)=>a.pct-b.pct).slice(0,5);
+    const sups=new Map<string,any>();
+    data.filter(r=>r.officer===name).forEach(r=>{const s=r.supervisor||"Unmapped";const x=sups.get(s)||{supervisor:s,heldSet:new Set<string>(),total:0,generated:0,delivered:0,docs:0};x.total++;x.generated+=r.generated;x.delivered+=r.delivered;x.docs+=r.docs;if(r.held)x.heldSet.add(r.ps);sups.set(s,x)});
+    const supRows=[...sups.values()].map(x=>({...x,held:x.heldSet.size,pct:x.delivered?x.docs/x.delivered:0})).filter(x=>x.delivered>0).sort((a,b)=>a.pct-b.pct).slice(0,5);
+    const body=rows.map(r=>[r.ps,r.blo,r.supervisor,r.generated,r.delivered,pct(r.delivered?r.delivered/r.generated:0),r.docs,pct(r.delivered?r.docs/r.delivered:0),`Hearing Held\n(${r.date})`]);
+    const supBody=supRows.map(r=>[r.supervisor,r.held,r.total,r.generated,r.delivered,pct(r.delivered?r.delivered/r.generated:0),r.docs,pct(r.delivered?r.docs/r.delivered:0)]);
+    const doc=makePdf("AC-34 MATIALA — SIR-2026 : UNDERPERFORMANCE REPORT (BLO / SUPERVISOR) — HEARING ALREADY HELD",`Officer: ${name}  |  Total Parts (PS): ${data.filter(r=>r.officer===name).length}  |  Report generated: ${new Date().toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"})}`,["Part No.","BLO Name","Supervisor Name","NO MAPPING NOTICE GENERATED","Notice Delivered","% Notice Delivered","Docs Uploaded","% Docs Uploaded","Hearing Status (Date(s))"],body,{redHeader:true,percentCols:[5,7],statusCol:8});
+    let y=(doc as any).lastAutoTable.finalY+6;
+    doc.setTextColor(174,0,0);doc.setFontSize(10);doc.setFont("helvetica","bold");doc.text("■ TOP 5 UNDERPERFORMING SUPERVISORS — Hearing Already Held (lowest weighted % Docs Uploaded across their BLOs)",14,y);y+=4;
+    autoTable(doc,{startY:y,head:[["Supervisor Name","BLOs (Hearing Held)","Total BLOs (PS, all)","NO MAPPING NOTICE GENERATED","Notice Delivered","% Notice Delivered","Docs Uploaded","% Docs Uploaded"]],body:supBody,theme:"grid",styles:{fontSize:7,cellPadding:1.7,lineColor:[205,205,205],textColor:[25,25,25]},headStyles:{fillColor:[174,0,0],textColor:[255,255,255],fontStyle:"bold",halign:"center"},alternateRowStyles:{fillColor:[252,238,238]},didParseCell:(d:any)=>{if(d.section==="body"&&(d.column.index===5||d.column.index===7)){const n=parseFloat(String(d.cell.raw).replace("%",""));d.cell.styles.fillColor=n<50?[252,221,221]:n<75?[255,242,204]:[234,246,234]}}});
+    y=(doc as any).lastAutoTable.finalY+5;doc.setFontSize(7);doc.setFont("helvetica","normal");doc.setTextColor(80);doc.text("Note: This report is restricted to PS whose hearing has ALREADY BEEN HELD (Hearing Status = \"Hearing Held\") and which had at least one Notice Delivered. Underperforming is based on lowest % Documents Uploaded (Documents Uploaded by BLO / Notice Delivered) among completed-hearing PS/Supervisors.",14,y,{maxWidth:270});
+    savePdf(doc,`${filenameSafe(name)}_Underperforming_BLO_Supervisor_HearingHeld.pdf`);
+  };
+  const downloadZip=async(type:"hearing"|"under")=>{
+    const zip=new JSZip();
+    for(const name of officers){
+      const original=(jsPDF.prototype as any).save;
+      let blob:Blob|null=null;
+      const rows=data.filter(r=>r.officer===name&&r.held);
+      if(type==="hearing"){
+        const body=rows.sort((a,b)=>Number(a.ps)-Number(b.ps)).map((r,i)=>[i+1,r.ps,r.blo,r.supervisor,r.generated,r.scheduled,r.delivered,pct(r.scheduled?r.delivered/r.scheduled:0),r.docs,pct(r.delivered?r.docs/r.delivered:0),r.date,"Hearing Held"]);
+        const totals=["TOTAL","","","",rows.reduce((a,r)=>a+r.generated,0),rows.reduce((a,r)=>a+r.scheduled,0),rows.reduce((a,r)=>a+r.delivered,0),"",rows.reduce((a,r)=>a+r.docs,0),"","",""];
+        const doc=makePdf("AC-34 MATIALA — SIR-2026 : PART WISE / PS WISE HEARING REPORT (HEARING ALREADY HELD)",`Officer: ${name}  |  Total Parts (PS): ${rows.length}  |  Report generated: ${new Date().toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"})}`,["S.No","Part No.","BLO Name","Supervisor Name","Notice Generated","Hearing Notice Sched. (NM)","Notice Delivered","% Notice Delivered","Docs Uploaded","% Docs Uploaded","Hearing Date(s)","Hearing Status"],body,{percentCols:[7,9],statusCol:11,total:totals});
+        blob=doc.output("blob");zip.file(`${filenameSafe(name)}_Part_Wise_Report_HearingHeld.pdf`,blob);
+      }else{
+        const rows2=data.filter(r=>r.officer===name&&r.held&&r.delivered>0).sort((a,b)=>a.pct-b.pct).slice(0,5);
+        const body=rows2.map(r=>[r.ps,r.blo,r.supervisor,r.generated,r.delivered,pct(r.generated?r.delivered/r.generated:0),r.docs,pct(r.delivered?r.docs/r.delivered:0),`Hearing Held\n(${r.date})`]);
+        const doc=makePdf("AC-34 MATIALA — SIR-2026 : UNDERPERFORMANCE REPORT (BLO / SUPERVISOR) — HEARING ALREADY HELD",`Officer: ${name}  |  Total Parts (PS): ${data.filter(r=>r.officer===name).length}  |  Report generated: ${new Date().toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"})}`,["Part No.","BLO Name","Supervisor Name","NO MAPPING NOTICE GENERATED","Notice Delivered","% Notice Delivered","Docs Uploaded","% Docs Uploaded","Hearing Status (Date(s))"],body,{redHeader:true,percentCols:[5,7],statusCol:8});
+        blob=doc.output("blob");zip.file(`${filenameSafe(name)}_Underperforming_BLO_Supervisor_HearingHeld.pdf`,blob);
+      }
+    }
+    const blob=await zip.generateAsync({type:"blob"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=type==="hearing"?"AC34_All_Officer_HearingHeld_Reports.zip":"AC34_All_Officer_Underperformance_Reports.zip";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+  };
+
+  const exportDocs=()=>{const rows=data.map(r=>[r.ps,r.blo,r.supervisor,r.officer,r.delivered,r.docs,pct(r.delivered?r.docs/r.delivered:0)]);const doc=makePdf("AC-34 MATIALA — PS-WISE DOCUMENTS UPLOADED BY BLO",`Total Parts (PS): ${data.length}  |  Report generated: ${new Date().toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"})}`,["PS","BLO Name","Supervisor Name","Officer Name","Notice Delivered","Docs Uploaded","% Docs Uploaded"],rows,{percentCols:[6]});savePdf(doc,"AC34_PS_Wise_BLO_Documents.pdf")};
+
+  return <main>
+    <header><div><div className="eyebrow">SIR-2026 • AC-34 MATIALA</div><h1>Hearing & BLO Performance Dashboard</h1><p>Latest ECI + BLO reports • officer, supervisor, PS and hearing reports update automatically.</p></div><button className="ghost" onClick={()=>location.reload()}><RefreshCw size={16}/>Refresh</button></header>
+    <section className="uploadGrid">
+      <label className="upload"><FileSpreadsheet/><span><b>Upload ECI Report</b><small>{eciName||"Excel / XLSX • Part-wise / hearing data"}</small></span><input type="file" accept=".xlsx,.xls,.csv" onChange={e=>ingest(setEci,setEciName,e,"eci")}/><Upload/></label>
+      <label className="upload"><FileCheck2/><span><b>Upload BLO Documents Report</b><small>{bloName||"Excel / XLSX • PS-wise documents uploaded"}</small></span><input type="file" accept=".xlsx,.xls,.csv" onChange={e=>ingest(setBlo,setBloName,e,"blo")}/><Upload/></label>
+    </section>
+    <section className="toolbar"><div className="tabs">{["overview","ps","officer","underperformer","hearing"].map(t=><button className={tab===t?"active":""} onClick={()=>setTab(t)} key={t}>{t==="ps"?"PS Wise":t[0].toUpperCase()+t.slice(1)}</button>)}</div><div className="search"><Search size={16}/><input placeholder="Search PS, officer, BLO, supervisor..." value={query} onChange={e=>setQuery(e.target.value)}/></div></section>
+    <section className="kpis">{[["Total PS",kpis.ps,Users],["Notices Generated",kpis.generated,FileSpreadsheet],["Notices Delivered",kpis.delivered,FileCheck2],["BLO Documents",kpis.docs,FileCheck2],["Hearing Held",kpis.held,CalendarCheck],["Underperformer PS",kpis.under,AlertTriangle]].map(([label,value,Icon])=><div className="card" key={String(label)}><Icon size={19}/><span>{label}</span><strong>{value as number}</strong></div>)}</section>
+
+    {tab==="overview"&&<><section className="panel"><div className="panelHead"><div><h2>Live Summary</h2><p>{data.length} PS currently loaded</p></div><div className="threshold">Underperformer threshold <input type="number" min="1" max="100" value={threshold} onChange={e=>setThreshold(Number(e.target.value)||50)}/>%</div></div><div className="progress"><div style={{width:Math.min(100,kpis.delivered?100*kpis.docs/kpis.delivered:0)+"%"}}/></div><div className="summaryline"><b>{kpis.delivered?pct(kpis.docs/kpis.delivered):"0.00%"}</b> document upload rate against delivered notices <span>{kpis.delivered} delivered</span></div></section><section className="panel"><div className="panelHead"><div><h2>Officer-wise performance</h2><p>Same officer names used in the source reports.</p></div></div><Table rows={officerSummary} cols={["officer","ps","held","hearingPct","scheduled","delivered","docs","pct"]}/></section></>}
+
+    {tab==="ps"&&<section className="panel"><h2>PS-wise Documents Uploaded by BLO</h2><Table rows={filtered} cols={["ps","officer","blo","supervisor","delivered","docs","pct","date","status"]}/></section>}
+
+    {tab==="officer"&&<section className="panel"><div className="panelHead"><div><h2>Officer-wise performance</h2><p>Download the same officer-wise PDF reports as the source format.</p></div><select value={currentOfficer} onChange={e=>setSelectedOfficer(e.target.value)}>{officers.map(o=><option key={o}>{o}</option>)}</select></div><Table rows={officerSummary.filter(r=>String(r.officer).toLowerCase().includes(query.toLowerCase()))} cols={["officer","ps","held","hearingPct","scheduled","delivered","docs","pct"]}/><div className="reportActions"><button className="download" onClick={()=>exportOfficerHearing(currentOfficer)}><Download size={15}/> Selected Officer — Hearing Held PDF</button><button className="download" onClick={()=>exportOfficerUnder(currentOfficer)}><Download size={15}/> Selected Officer — Underperformance PDF</button><button className="download" onClick={()=>downloadZip("hearing")}><FileArchive size={15}/> All Officer Hearing PDFs (ZIP)</button><button className="download" onClick={()=>downloadZip("under")}><FileArchive size={15}/> All Officer Underperformance PDFs (ZIP)</button></div></section>}
+
+    {tab==="underperformer"&&<section className="panel"><div className="panelHead"><div><h2>Underperformer BLO / PS — Hearing Already Held</h2><p>Restricted to hearing-held PS with at least one notice delivered, matching the source report logic.</p></div><div className="reportActions"><button className="download" onClick={()=>exportOfficerUnder(currentOfficer)}><Download size={15}/> Current Officer PDF</button><button className="download" onClick={()=>downloadZip("under")}><FileArchive size={15}/> All Officers ZIP</button></div></div><Table rows={underperformers.filter(r=>Object.values(r).join(" ").toLowerCase().includes(query.toLowerCase()))} cols={["ps","officer","blo","supervisor","generated","delivered","pct","docs","date"]}/></section>}
+
+    {tab==="hearing"&&<section className="panel"><div className="panelHead"><div><h2>Hearing Completed — Officer / PS Wise</h2><p>Same part-wise structure as the uploaded Hearing Held reports.</p></div><div className="reportActions"><button className="download" onClick={()=>exportOfficerHearing(currentOfficer)}><Download size={15}/> Current Officer PDF</button><button className="download" onClick={()=>downloadZip("hearing")}><FileArchive size={15}/> All Officers ZIP</button></div></div><Table rows={hearingRows.filter(r=>Object.values(r).join(" ").toLowerCase().includes(query.toLowerCase()))} cols={["ps","officer","blo","supervisor","generated","scheduled","delivered","docs","pct","date","status"]}/></section>}
+
+    <section className="exports"><h2>Reports & PDFs</h2><button onClick={exportDocs}><Download/>PS-wise BLO Documents</button><button onClick={()=>exportOfficerUnder(currentOfficer)}><Download/>Underperformance — Current Officer</button><button onClick={()=>exportOfficerHearing(currentOfficer)}><Download/>Hearing Held — Current Officer</button><button onClick={()=>downloadZip("under")}><FileArchive/>All Underperformance PDFs ZIP</button><button onClick={()=>downloadZip("hearing")}><FileArchive/>All Hearing Held PDFs ZIP</button></section>
+    {loading&&<div className="loading">Reading Excel…</div>}
+  </main>
 }
-function Table({rows,cols}:{rows:any[],cols:string[]}){return <div className="tableWrap"><table><thead><tr>{cols.map(c=><th key={c}>{c==="pct"?"Upload %":c==="hearingPct"?"Hearing %":c}</th>)}</tr></thead><tbody>{rows.slice(0,500).map((r,i)=><tr key={i}>{cols.map(c=><td key={c}>{c==="pct"||c==="hearingPct"?((Number(r[c]||0)*100).toFixed(1)+"%"):String(r[c]??"")}</td>)}</tr>)}</tbody></table>{rows.length>500&&<div className="muted">Showing first 500 matching records.</div>}</div>}
+
+function Table({rows,cols}:{rows:any[],cols:string[]}){
+  return <div className="tableWrap"><table><thead><tr>{cols.map(c=><th key={c}>{({pct:"Upload %",hearingPct:"Hearing %",generated:"Notice Generated",delivered:"Notice Delivered",docs:"Docs Uploaded",scheduled:"Hearing Sched. (NM)",ps:"PS"}) as any}[c]||c}</th>)}</tr></thead><tbody>{rows.slice(0,1000).map((r,i)=><tr key={i}>{cols.map(c=>{const v=r[c];const isP=c==="pct"||c==="hearingPct";const n=Number(v||0);return <td className={isP?(n<.5?"bad":n<.75?"warn":"good"):c==="status"&&r.held?"good":""} key={c}>{isP?pct(n):String(v??"")}</td>})}</tr>)}</tbody></table>{rows.length>1000&&<div className="muted">Showing first 1000 matching records.</div>}</div>
+}
