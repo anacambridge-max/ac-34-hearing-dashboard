@@ -3,6 +3,6 @@
   "version":"1.0.0",
   "private":true,
   "scripts":{"dev":"next dev","build":"next build","start":"next start","lint":"next lint"},
-  "dependencies":{"@/":"latest","next":"latest","react":"latest","react-dom":"latest","xlsx":"latest","jspdf":"latest","jspdf-autotable":"latest","lucide-react":"latest"},
+  "dependencies":{"next":"latest","react":"latest","react-dom":"latest","xlsx":"latest","jspdf":"latest","jspdf-autotable":"latest","lucide-react":"latest"},
   "devDependencies":{"typescript":"latest","@types/node":"latest","@types/react":"latest","@types/react-dom":"latest"}
 }
