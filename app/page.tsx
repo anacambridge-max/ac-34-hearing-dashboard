@@ -9,6 +9,7 @@ import autoTable from "jspdf-autotable";
 
 type Row=Record<string,any>;
 type Sheet={name:string;rows:Row[];headers:string[]};
+type RawSheet={name:string;matrix:any[][]};
 
 const norm=(v:any)=>String(v??"").trim();
 const num=(v:any)=>{const n=Number(v);return Number.isFinite(n)?n:0};
@@ -70,6 +71,19 @@ async function parseWorkbook(file:File):Promise<Sheet[]>{
     return {name,rows,headers};
   });
 }
+async function parseRawWorkbook(file:File):Promise<RawSheet[]>{
+  const buf=await file.arrayBuffer();
+  const wb=XLSX.read(buf,{type:"array",cellDates:true});
+  return wb.SheetNames.map(name=>{
+    const matrix:any[][]=XLSX.utils.sheet_to_json<any[]>(wb.Sheets[name],{header:1,defval:"",raw:true});
+    return {name,matrix};
+  });
+}
+function displayCell(v:any){
+  if(v instanceof Date && !isNaN(v.getTime())) return v.toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"}).replaceAll(" ","-");
+  return String(v??"");
+}
+
 function scoreSheet(s:Sheet,type:"eci"|"blo"){
   const ks=s.headers.map(keyNorm).join(" ");
   if(type==="blo"){
@@ -130,13 +144,24 @@ export default function Page(){
   const [tab,setTab]=useState("overview");
   const [threshold,setThreshold]=useState(50);
   const [selectedOfficer,setSelectedOfficer]=useState("");
-  const [loading,setLoading]=useState(false);
+  const [loading,setLoading]=useState(false);\n  const [masterSheets,setMasterSheets]=useState<RawSheet[]>([]);\n  const [masterName,setMasterName]=useState("");\n  const [masterTab,setMasterTab]=useState("");
 
   const ingest=async(setter:(r:Row[])=>void,setName:(s:string)=>void,e:React.ChangeEvent<HTMLInputElement>,type:"eci"|"blo")=>{
     const file=e.target.files?.[0];if(!file)return;
     setLoading(true);
     try{const sheets=await parseWorkbook(file);const chosen=chooseSheet(sheets,type);setter(chosen.rows);setName(file.name);if(type==="eci")setEciSheets(sheets);else setBloSheets(sheets);}
     finally{setLoading(false);}
+  };
+  const ingestMaster=async(e:React.ChangeEvent<HTMLInputElement>)=>{
+    const file=e.target.files?.[0];if(!file)return;
+    setLoading(true);
+    try{
+      const sheets=await parseRawWorkbook(file);
+      setMasterSheets(sheets);
+      setMasterName(file.name);
+      setMasterTab(sheets[0]?.name||"");
+      setTab("excel");
+    }finally{setLoading(false);}
   };
 
   const data=useMemo(()=>{
@@ -339,8 +364,9 @@ export default function Page(){
     <section className="uploadGrid">
       <label className="upload"><FileSpreadsheet/><span><b>Upload ECI Report</b><small>{eciName||"Excel / XLSX • Part-wise / hearing data"}</small></span><input type="file" accept=".xlsx,.xls,.csv" onChange={e=>ingest(setEci,setEciName,e,"eci")}/><Upload/></label>
       <label className="upload"><FileCheck2/><span><b>Upload BLO Documents Report</b><small>{bloName||"Excel / XLSX • PS-wise documents uploaded"}</small></span><input type="file" accept=".xlsx,.xls,.csv" onChange={e=>ingest(setBlo,setBloName,e,"blo")}/><Upload/></label>
+      <label className="upload"><FileSpreadsheet/><span><b>Upload Final Excel Report</b><small>{masterName||"Loads every sheet exactly as in the Excel workbook"}</small></span><input type="file" accept=".xlsx,.xls" onChange={ingestMaster}/><Upload/></label>
     </section>
-    <section className="toolbar"><div className="tabs">{["overview","ps","officer","underperformer","hearing"].map(t=><button className={tab===t?"active":""} onClick={()=>setTab(t)} key={t}>{t==="ps"?"PS Wise":t[0].toUpperCase()+t.slice(1)}</button>)}</div><div className="search"><Search size={16}/><input placeholder="Search PS, officer, BLO, supervisor..." value={query} onChange={e=>setQuery(e.target.value)}/></div></section>
+    <section className="toolbar"><div className="tabs">{["overview","ps","officer","underperformer","hearing","excel"].map(t=><button className={tab===t?"active":""} onClick={()=>setTab(t)} key={t}>{t==="ps"?"PS Wise":t[0].toUpperCase()+t.slice(1)}</button>)}</div><div className="search"><Search size={16}/><input placeholder="Search PS, officer, BLO, supervisor..." value={query} onChange={e=>setQuery(e.target.value)}/></div></section>
     <section className="kpis">{[["Total PS",kpis.ps,Users],["Notices Generated",kpis.generated,FileSpreadsheet],["Notices Delivered",kpis.delivered,FileCheck2],["BLO Documents",kpis.docs,FileCheck2],["Hearing Held",kpis.held,CalendarCheck],["Underperformer PS",kpis.under,AlertTriangle]].map(([label,value,Icon])=><div className="card" key={String(label)}><Icon size={19}/><span>{label}</span><strong>{value as number}</strong></div>)}</section>
 
     {tab==="overview"&&<><section className="panel"><div className="panelHead"><div><h2>Live Summary</h2><p>{data.length} PS currently loaded</p></div><div className="threshold">Underperformer threshold <input type="number" min="1" max="100" value={threshold} onChange={e=>setThreshold(Number(e.target.value)||50)}/>%</div></div><div className="progress"><div style={{width:Math.min(100,kpis.delivered?100*kpis.docs/kpis.delivered:0)+"%"}}/></div><div className="summaryline"><b>{kpis.delivered?pct(kpis.docs/kpis.delivered):"0.00%"}</b> document upload rate against delivered notices <span>{kpis.delivered} delivered</span></div></section><section className="panel"><div className="panelHead"><div><h2>Officer-wise performance</h2><p>Same officer names used in the source reports.</p></div></div><Table rows={officerSummary} cols={["officer","officerContact","ps","held","hearingPct","scheduled","delivered","docs","pct"]}/></section></>}
@@ -353,6 +379,17 @@ export default function Page(){
 
     {tab==="hearing"&&<section className="panel"><div className="panelHead"><div><h2>Hearing Completed — Officer / PS Wise</h2><p>Same part-wise structure as the uploaded Hearing Held reports.</p></div><div className="reportActions"><button className="download" onClick={()=>exportOfficerHearing(currentOfficer)}><Download size={15}/> Current Officer PDF</button><button className="download" onClick={()=>downloadZip("hearing")}><FileArchive size={15}/> All Officers ZIP</button></div></div><Table rows={hearingRows.filter(r=>Object.values(r).join(" ").toLowerCase().includes(query.toLowerCase()))} cols={["ps","officer","officerContact","blo","bloContact","supervisor","supervisorContact","generated","scheduled","delivered","docs","pct","date","status"]}/></section>}
 
+
+    {tab==="excel"&&<section className="panel">
+      <div className="panelHead">
+        <div><h2>Excel Workbook — All Sheets</h2><p>{masterName?masterName:"Upload the same Excel report to view every sheet here."}</p></div>
+      </div>
+      {!masterSheets.length?<div className="muted">No master Excel loaded yet. Upload <b>REPORT DATED 20.09.2026 4PM.xlsx</b> (or the latest final report) above. The dashboard will then show all 8 sheets: Dashboard, Part Wise Report, Supervisor Wise Report, Officer Wise Report, Hearing Dates, PS Mapping, ECI Raw Data and BLO Doc Upload Raw Data.</div>:
+      <>
+        <div className="sheetTabs">{masterSheets.map(s=><button className={masterTab===s.name?"active":""} onClick={()=>setMasterTab(s.name)} key={s.name}>{s.name}</button>)}</div>
+        {masterSheets.filter(s=>s.name===masterTab).map(s=><RawSheetView key={s.name} sheet={s}/>)}
+      </>}
+    </section>}
     <section className="exports"><h2>Reports & PDFs</h2><button onClick={exportDocs}><Download/>PS-wise BLO Documents</button><button onClick={()=>exportOfficerUnder(currentOfficer)}><Download/>Underperformance — Current Officer</button><button onClick={()=>exportOfficerHearing(currentOfficer)}><Download/>Hearing Held — Current Officer</button><button onClick={()=>downloadZip("under")}><FileArchive/>All Underperformance PDFs ZIP</button><button onClick={()=>downloadZip("hearing")}><FileArchive/>All Hearing Held PDFs ZIP</button><button onClick={exportOfficerWise}><FileArchive/>Officer-wise Full Report PDF</button></section>
     {loading&&<div className="loading">Reading Excel…</div>}
   </main>
@@ -360,4 +397,19 @@ export default function Page(){
 
 function Table({rows,cols}:{rows:any[],cols:string[]}){
   return <div className="tableWrap"><table><thead><tr>{cols.map(c=><th key={c}>{(({pct:"Upload %",hearingPct:"Hearing %",generated:"Notice Generated",delivered:"Notice Delivered",docs:"Docs Uploaded",scheduled:"Hearing Sched. (NM)",ps:"PS",officer:"Officer Name",officerContact:"Officer Contact",blo:"BLO Name",bloContact:"BLO Contact",supervisor:"Supervisor Name",supervisorContact:"Supervisor Contact",held:"Hearing Held"}) as any)[c]||c}</th>)}</tr></thead><tbody>{rows.slice(0,1000).map((r,i)=><tr key={i}>{cols.map(c=>{const v=r[c];const isP=c==="pct"||c==="hearingPct";const n=Number(v||0);return <td className={isP?(n<.5?"bad":n<.75?"warn":"good"):c==="status"&&r.held?"good":""} key={c}>{isP?pct(n):String(v??"")}</td>})}</tr>)}</tbody></table>{rows.length>1000&&<div className="muted">Showing first 1000 matching records.</div>}</div>
+}
+function RawSheetView({sheet}:{sheet:RawSheet}){
+  const rows=sheet.matrix;
+  const maxCols=Math.max(1,...rows.map(r=>r.length));
+  return <div className="excelSheetWrap">
+    <div className="excelMeta"><b>{sheet.name}</b><span>{rows.length} rows × {maxCols} columns</span></div>
+    <div className="rawExcelTable">
+      <table><tbody>
+        {rows.map((row,ri)=><tr key={ri}>
+          <td className="rowNo">{ri+1}</td>
+          {Array.from({length:maxCols},(_,ci)=><td key={ci} className={ri===0||ri===1||ri===2?"excelHead":""}>{displayCell(row[ci])}</td>)}
+        </tr>)}
+      </tbody></table>
+    </div>
+  </div>
 }
