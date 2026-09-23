@@ -5,9 +5,9 @@ import {jsPDF} from "jspdf";
 
 const get=(k:string)=>typeof window==="undefined"?"":new URLSearchParams(window.location.search).get(k)||"";
 const reasonText:Record<string,string>={
-  R01:"The elector did not appear before the undersigned on the notified date and time, and no document in support of the claim has been received till date.",
-  R02:"The elector appeared but did not produce any of the documents prescribed by the Election Commission of India in support of the claim.",
-  R03:"The elector appeared and produced document(s), which on scrutiny were found insufficient to establish linkage/eligibility."
+ R01:"The elector did not appear before the undersigned on the notified date and time, and no document in support of the claim has been received till date.",
+ R02:"The elector appeared but did not produce any of the documents prescribed by the Election Commission of India in support of the claim.",
+ R03:"The elector appeared and produced document(s), which on scrutiny were found insufficient to establish linkage/eligibility."
 };
 const dec=(v:string)=>{try{return decodeURIComponent(v.replace(/\+/g," "))}catch{return v}};
 
@@ -24,7 +24,7 @@ export default function RejectionPage(){
   let url="";
   try{
    const doc=new jsPDF({unit:"mm",format:"a4"});
-   const left=18,right=18,width=174,valueX=70,valueWidth=122;
+   const left=18,width=174,valueX=70,valueWidth=122;
    let y=20;
 
    const ensureSpace=(needed:number)=>{
@@ -32,31 +32,16 @@ export default function RejectionPage(){
     return false;
    };
 
-   // Draw a genuinely justified paragraph: every line except the last is stretched
-   // to the full available width, while the last line remains left aligned.
-   const justifiedParagraph=(text:string,spacing=4.5)=>{
+   // Keep normal word spacing. The previous character-by-character
+   // justification caused PDF text extraction to join words together.
+   // This version wraps cleanly inside the A4 text block.
+   const paragraph=(text:string,spacing=4.5)=>{
+    doc.setFont("times","normal");
+    doc.setFontSize(10.5);
     const lines=doc.splitTextToSize(text,width) as string[];
     ensureSpace(lines.length*5.1+spacing);
-    const fontSize=10.5;
-    doc.setFontSize(fontSize);
-    lines.forEach((line:string,index:number)=>{
-      const words=line.trim().split(/\s+/);
-      const last=index===lines.length-1 || words.length<2;
-      if(last){
-        doc.text(line,left,y);
-      }else{
-        const natural=doc.getTextWidth(line);
-        const target=width;
-        const extra=(target-natural)/(words.length-1);
-        let x=left;
-        words.forEach((word:string,i:number)=>{
-          doc.text(word,x,y);
-          x+=doc.getTextWidth(word)+extra;
-        });
-      }
-      y+=5.1;
-    });
-    y+=spacing;
+    doc.text(lines,left,y,{lineHeightFactor:1.25});
+    y+=lines.length*5.1+spacing;
    };
 
    doc.setFont("times","bold");
@@ -92,46 +77,29 @@ export default function RejectionPage(){
    doc.text(venueLines,valueX,y,{lineHeightFactor:1.2});
    y+=Math.max(venueLines.length*5,6)+6;
 
-   doc.setFont("times","normal");
-   doc.setFontSize(10.5);
-   justifiedParagraph("Whereas, in the course of the Special Intensive Revision of the electoral roll of the Assembly Constituency-34, Matiala, it was observed that the above elector's/relative's entry could not be linked with the electoral roll prepared during the previous Special Intensive Revision, and a notice under the SIR was accordingly issued to the elector requiring appearance before the undersigned, along with the documents prescribed by the Election Commission of India, to substantiate the claim for retention of the name in the electoral roll;");
+   paragraph("Whereas, in the course of the Special Intensive Revision of the electoral roll of the Assembly Constituency-34, Matiala, it was observed that the above elector's/relative's entry could not be linked with the electoral roll prepared during the previous Special Intensive Revision, and a notice under the SIR was accordingly issued to the elector requiring appearance before the undersigned, along with the documents prescribed by the Election Commission of India, to substantiate the claim for retention of the name in the electoral roll;");
 
-   justifiedParagraph("And whereas, on the date and at the venue so notified, the elector was afforded a reasonable opportunity of being heard, and upon such hearing it is recorded that:");
+   paragraph("And whereas, on the date and at the venue so notified, the elector was afforded a reasonable opportunity of being heard, and upon such hearing it is recorded that:");
 
    const selected=reasonText[data.reason]||reasonText.R01;
    const reasonLines=doc.splitTextToSize(selected,width-9) as string[];
    ensureSpace(reasonLines.length*5.1+12);
-   doc.setFont("times","bold");
-   doc.rect(left+1,y-3.5,4,4);
    doc.setFont("times","normal");
-   doc.setFontSize(10.5);
-   reasonLines.forEach((line:string,index:number)=>{
-     const words=line.trim().split(/\s+/);
-     const last=index===reasonLines.length-1 || words.length<2;
-     if(last) doc.text(line,left+8,y);
-     else{
-       const target=width-9, natural=doc.getTextWidth(line);
-       const extra=(target-natural)/(words.length-1);
-       let x=left+8;
-       words.forEach((word:string,i:number)=>{doc.text(word,x,y);x+=doc.getTextWidth(word)+(i<words.length-1?extra:0)});
-     }
-     y+=5.1;
-   });
-   y+=8;
+   doc.rect(left+1,y-3.5,4,4);
+   doc.text(reasonLines,left+8,y,{lineHeightFactor:1.25});
+   y+=reasonLines.length*5.1+8;
 
-   justifiedParagraph("Now, therefore, in exercise of the powers vested under Section 22 of the Representation of the People Act, 1950, and having considered the material and, where applicable, the submissions made at the hearing, I am satisfied for the reason recorded above that the claim of the elector for retention of the entry in the electoral roll of AC No. 34-Matiala is not established.");
+   paragraph("Now, therefore, in exercise of the powers vested under Section 22 of the Representation of the People Act, 1950, and having considered the material and, where applicable, the submissions made at the hearing, I am satisfied for the reason recorded above that the claim of the elector for retention of the entry in the electoral roll of AC No. 34-Matiala is not established.");
 
-   justifiedParagraph("It is accordingly ORDERED that the entry relating to the above elector be deleted / not included in the electoral roll of AC No. 34-Matiala, subject to the right of appeal below.");
+   paragraph("It is accordingly ORDERED that the entry relating to the above elector be deleted / not included in the electoral roll of AC No. 34-Matiala, subject to the right of appeal below.");
 
    ensureSpace(30);
    doc.setFont("times","bold");
    doc.setFontSize(10.5);
    doc.text("Right of Appeal:",left,y);
    y+=6;
-   doc.setFont("times","normal");
-   justifiedParagraph("An appeal against this order lies under Section 24 of the Representation of the People Act, 1950, before the District Magistrate / designated appellate authority, within the period prescribed, along with the fee, if any, prescribed under the Registration of Electors Rules, 1960.",4);
+   paragraph("An appeal against this order lies under Section 24 of the Representation of the People Act, 1950, before the District Magistrate / designated appellate authority, within the period prescribed, along with the fee, if any, prescribed under the Registration of Electors Rules, 1960.",4);
 
-   // Date is generated at the moment the PDF is generated/downloaded.
    const now=new Date();
    const generatedDate=String(now.getDate()).padStart(2,"0")+"-"+String(now.getMonth()+1).padStart(2,"0")+"-"+now.getFullYear();
 
@@ -141,18 +109,14 @@ export default function RejectionPage(){
    doc.text("Date: "+generatedDate,left,y);
    y+=18;
 
-   // Signature block at the right side of the order.
    doc.setFont("times","bold");
-   doc.text(data.officer||"Parveen Kumar",105+69,y,{align:"right"});
+   doc.text(data.officer||"Parveen Kumar",192,y,{align:"right"});
    y+=6;
-   doc.text("AERO AC-34",105+69,y,{align:"right"});
+   doc.text("AERO AC-34",192,y,{align:"right"});
 
    url=URL.createObjectURL(doc.output("blob"));
    setPdfUrl(url);
-  }catch(e){
-   console.error(e);
-   setError("Unable to generate this PDF.");
-  }
+  }catch(e){console.error(e);setError("Unable to generate this PDF.");}
   return()=>{if(url)URL.revokeObjectURL(url)};
  },[data]);
 
