@@ -125,7 +125,7 @@ export default function RejectionPage(){
     }
     y+=5.1;
    });
-   y+=reasonLines.length*5.1+8;
+   y+=8;
 
    paragraph("Now, therefore, in exercise of the powers vested under Section 22 of the Representation of the People Act, 1950, and having considered the material and, where applicable, the submissions made at the hearing, I am satisfied for the reason recorded above that the claim of the elector for retention of the entry in the electoral roll of AC No. 34-Matiala is not established.");
 
