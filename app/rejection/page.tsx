@@ -85,7 +85,13 @@ export default function RejectionPage(){
    const reasonLines=doc.splitTextToSize(selected,width-9) as string[];
    ensureSpace(reasonLines.length*5.1+12);
    doc.setFont("times","normal");
+   // Selected reason gets a visible tick mark inside the checkbox.
    doc.rect(left+1,y-3.5,4,4);
+   doc.setFont("times","bold");
+   doc.setFontSize(11);
+   doc.text("✓",left+1.25,y-0.15);
+   doc.setFont("times","normal");
+   doc.setFontSize(10.5);
    doc.text(reasonLines,left+8,y,{lineHeightFactor:1.25});
    y+=reasonLines.length*5.1+8;
 
