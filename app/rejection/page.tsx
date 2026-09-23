@@ -40,7 +40,7 @@ export default function RejectionPage(){
     const lines=doc.splitTextToSize(text,width) as string[];
     ensureSpace(lines.length*5.1+spacing);
     lines.forEach((line:string,index:number)=>{
-     const words=line.trim().split(/\\s+/);
+     const words=line.trim().split(/\s+/);
      const last=index===lines.length-1 || words.length<2;
      if(last){
       doc.text(line,left,y);
@@ -108,7 +108,7 @@ export default function RejectionPage(){
    doc.setFont("times","bold");
    doc.setFontSize(10.5);
    reasonLines.forEach((line:string,index:number)=>{
-    const words=line.trim().split(/\\s+/);
+    const words=line.trim().split(/\s+/);
     const last=index===reasonLines.length-1 || words.length<2;
     if(last){
      doc.text(line,left+8,y);
