@@ -32,19 +32,27 @@ export default function RejectionPage(){
     return false;
    };
 
-   // Proper PDF justification: let jsPDF justify each wrapped line instead of
-   // manually moving individual words. This keeps normal word spacing in extraction.
+   // True visual justification with explicit word spacing.
+   // Each word carries its own trailing space so PDF text extraction remains readable.
    const paragraph=(text:string,spacing=4.5)=>{
     doc.setFont("times","normal");
     doc.setFontSize(10.5);
     const lines=doc.splitTextToSize(text,width) as string[];
     ensureSpace(lines.length*5.1+spacing);
     lines.forEach((line:string,index:number)=>{
-     const isLast=index===lines.length-1;
-     if(isLast){
+     const words=line.trim().split(/\\s+/);
+     const last=index===lines.length-1 || words.length<2;
+     if(last){
       doc.text(line,left,y);
      }else{
-      doc.text(line,left,y,{align:"justify",maxWidth:width});
+      const baseSpace=doc.getTextWidth(" ");
+      const wordWidths=words.reduce((sum,w)=>sum+doc.getTextWidth(w),0);
+      const extra=(width-wordWidths-baseSpace*(words.length-1))/(words.length-1);
+      let x=left;
+      words.forEach((word:string,i:number)=>{
+       doc.text(i<words.length-1 ? word+" " : word,x,y);
+       x+=doc.getTextWidth(word)+baseSpace+(i<words.length-1?extra:0);
+      });
      }
      y+=5.1;
     });
@@ -91,7 +99,7 @@ export default function RejectionPage(){
    const selected=reasonText[data.reason]||reasonText.R01;
    const reasonLines=doc.splitTextToSize(selected,width-9) as string[];
    ensureSpace(reasonLines.length*5.1+12);
-   // Selected reason: bold text + clear tick mark + justified wrapped lines.
+   // Selected reason: bold text + clear tick mark + true visual justification.
    doc.setDrawColor(0,0,0);
    doc.setLineWidth(0.55);
    doc.rect(left+1,y-3.5,4,4);
@@ -100,11 +108,20 @@ export default function RejectionPage(){
    doc.setFont("times","bold");
    doc.setFontSize(10.5);
    reasonLines.forEach((line:string,index:number)=>{
-    const isLast=index===reasonLines.length-1;
-    if(isLast){
+    const words=line.trim().split(/\\s+/);
+    const last=index===reasonLines.length-1 || words.length<2;
+    if(last){
      doc.text(line,left+8,y);
     }else{
-     doc.text(line,left+8,y,{align:"justify",maxWidth:width-9});
+     const target=width-9;
+     const baseSpace=doc.getTextWidth(" ");
+     const wordWidths=words.reduce((sum,w)=>sum+doc.getTextWidth(w),0);
+     const extra=(target-wordWidths-baseSpace*(words.length-1))/(words.length-1);
+     let x=left+8;
+     words.forEach((word:string,i:number)=>{
+      doc.text(i<words.length-1 ? word+" " : word,x,y);
+      x+=doc.getTextWidth(word)+baseSpace+(i<words.length-1?extra:0);
+     });
     }
     y+=5.1;
    });
