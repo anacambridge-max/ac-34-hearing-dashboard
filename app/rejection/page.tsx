@@ -84,13 +84,14 @@ export default function RejectionPage(){
    const selected=reasonText[data.reason]||reasonText.R01;
    const reasonLines=doc.splitTextToSize(selected,width-9) as string[];
    ensureSpace(reasonLines.length*5.1+12);
-   doc.setFont("times","normal");
-   // Selected reason gets a visible tick mark inside the checkbox.
+   // Selected reason: bold text + a clearly visible tick mark inside the box.
+   doc.setDrawColor(0,0,0);
+   doc.setLineWidth(0.55);
    doc.rect(left+1,y-3.5,4,4);
+   // Draw the tick as vector strokes so it renders correctly in every PDF viewer.
+   doc.line(left+1.7,y-1.5,left+2.7,y-0.35);
+   doc.line(left+2.7,y-0.35,left+4.35,y-2.45);
    doc.setFont("times","bold");
-   doc.setFontSize(11);
-   doc.text("✓",left+1.25,y-0.15);
-   doc.setFont("times","normal");
    doc.setFontSize(10.5);
    doc.text(reasonLines,left+8,y,{lineHeightFactor:1.25});
    y+=reasonLines.length*5.1+8;
