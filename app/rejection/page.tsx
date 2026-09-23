@@ -24,19 +24,39 @@ export default function RejectionPage(){
   let url="";
   try{
    const doc=new jsPDF({unit:"mm",format:"a4"});
-   const left=18,right=18,width=174,contentRight=192;
-   const valueX=70,valueWidth=122;
+   const left=18,right=18,width=174,valueX=70,valueWidth=122;
    let y=20;
 
    const ensureSpace=(needed:number)=>{
     if(y+needed>270){doc.addPage();y=20;return true}
     return false;
    };
-   const paragraph=(t:string,spacing=4.5)=>{
-    const lines=doc.splitTextToSize(t,width);
+
+   // Draw a genuinely justified paragraph: every line except the last is stretched
+   // to the full available width, while the last line remains left aligned.
+   const justifiedParagraph=(text:string,spacing=4.5)=>{
+    const lines=doc.splitTextToSize(text,width) as string[];
     ensureSpace(lines.length*5.1+spacing);
-    doc.text(lines,left,y,{lineHeightFactor:1.25});
-    y+=lines.length*5.1+spacing;
+    const fontSize=10.5;
+    doc.setFontSize(fontSize);
+    lines.forEach((line:string,index:number)=>{
+      const words=line.trim().split(/\s+/);
+      const last=index===lines.length-1 || words.length<2;
+      if(last){
+        doc.text(line,left,y);
+      }else{
+        const natural=doc.getTextWidth(line);
+        const target=width;
+        const extra=(target-natural)/(words.length-1);
+        let x=left;
+        words.forEach((word:string,i:number)=>{
+          doc.text(word,x,y);
+          x+=doc.getTextWidth(word)+extra;
+        });
+      }
+      y+=5.1;
+    });
+    y+=spacing;
    };
 
    doc.setFont("times","bold");
@@ -72,38 +92,60 @@ export default function RejectionPage(){
    doc.text(venueLines,valueX,y,{lineHeightFactor:1.2});
    y+=Math.max(venueLines.length*5,6)+6;
 
-   paragraph("Whereas, in the course of the Special Intensive Revision of the electoral roll of the Assembly Constituency-34, Matiala, it was observed that the above elector's/relative's entry could not be linked with the electoral roll prepared during the previous Special Intensive Revision, and a notice under the SIR was accordingly issued to the elector requiring appearance before the undersigned, along with the documents prescribed by the Election Commission of India, to substantiate the claim for retention of the name in the electoral roll;");
+   doc.setFont("times","normal");
+   doc.setFontSize(10.5);
+   justifiedParagraph("Whereas, in the course of the Special Intensive Revision of the electoral roll of the Assembly Constituency-34, Matiala, it was observed that the above elector's/relative's entry could not be linked with the electoral roll prepared during the previous Special Intensive Revision, and a notice under the SIR was accordingly issued to the elector requiring appearance before the undersigned, along with the documents prescribed by the Election Commission of India, to substantiate the claim for retention of the name in the electoral roll;");
 
-   paragraph("And whereas, on the date and at the venue so notified, the elector was afforded a reasonable opportunity of being heard, and upon such hearing it is recorded that:");
+   justifiedParagraph("And whereas, on the date and at the venue so notified, the elector was afforded a reasonable opportunity of being heard, and upon such hearing it is recorded that:");
 
    const selected=reasonText[data.reason]||reasonText.R01;
-   const reasonLines=doc.splitTextToSize(selected,width-9);
+   const reasonLines=doc.splitTextToSize(selected,width-9) as string[];
    ensureSpace(reasonLines.length*5.1+12);
    doc.setFont("times","bold");
    doc.rect(left+1,y-3.5,4,4);
    doc.setFont("times","normal");
-   doc.text(reasonLines,left+8,y,{lineHeightFactor:1.25});
-   y+=reasonLines.length*5.1+8;
+   doc.setFontSize(10.5);
+   reasonLines.forEach((line:string,index:number)=>{
+     const words=line.trim().split(/\s+/);
+     const last=index===reasonLines.length-1 || words.length<2;
+     if(last) doc.text(line,left+8,y);
+     else{
+       const target=width-9, natural=doc.getTextWidth(line);
+       const extra=(target-natural)/(words.length-1);
+       let x=left+8;
+       words.forEach((word:string,i:number)=>{doc.text(word,x,y);x+=doc.getTextWidth(word)+(i<words.length-1?extra:0)});
+     }
+     y+=5.1;
+   });
+   y+=8;
 
-   paragraph("Now, therefore, in exercise of the powers vested under Section 22 of the Representation of the People Act, 1950, and having considered the material and, where applicable, the submissions made at the hearing, I am satisfied for the reason recorded above that the claim of the elector for retention of the entry in the electoral roll of AC No. 34-Matiala is not established.");
+   justifiedParagraph("Now, therefore, in exercise of the powers vested under Section 22 of the Representation of the People Act, 1950, and having considered the material and, where applicable, the submissions made at the hearing, I am satisfied for the reason recorded above that the claim of the elector for retention of the entry in the electoral roll of AC No. 34-Matiala is not established.");
 
-   paragraph("It is accordingly ORDERED that the entry relating to the above elector be deleted / not included in the electoral roll of AC No. 34-Matiala, subject to the right of appeal below.");
+   justifiedParagraph("It is accordingly ORDERED that the entry relating to the above elector be deleted / not included in the electoral roll of AC No. 34-Matiala, subject to the right of appeal below.");
 
    ensureSpace(30);
    doc.setFont("times","bold");
+   doc.setFontSize(10.5);
    doc.text("Right of Appeal:",left,y);
    y+=6;
    doc.setFont("times","normal");
-   paragraph("An appeal against this order lies under Section 24 of the Representation of the People Act, 1950, before the District Magistrate / designated appellate authority, within the period prescribed, along with the fee, if any, prescribed under the Registration of Electors Rules, 1960.",4);
+   justifiedParagraph("An appeal against this order lies under Section 24 of the Representation of the People Act, 1950, before the District Magistrate / designated appellate authority, within the period prescribed, along with the fee, if any, prescribed under the Registration of Electors Rules, 1960.",4);
 
-   ensureSpace(28);
+   // Date is generated at the moment the PDF is generated/downloaded.
+   const now=new Date();
+   const generatedDate=String(now.getDate()).padStart(2,"0")+"-"+String(now.getMonth()+1).padStart(2,"0")+"-"+now.getFullYear();
+
+   ensureSpace(35);
    y+=5;
-   doc.text("Date: ____________________    Place: New Delhi",left,y);
-   y+=16;
+   doc.setFont("times","normal");
+   doc.text("Date: "+generatedDate,left,y);
+   y+=18;
+
+   // Signature block at the right side of the order.
    doc.setFont("times","bold");
-   doc.text(data.officer||"Hearing Officer",left,y);
+   doc.text(data.officer||"Parveen Kumar",105+69,y,{align:"right"});
    y+=6;
-   doc.text("AERO AC-34",left,y);
+   doc.text("AERO AC-34",105+69,y,{align:"right"});
 
    url=URL.createObjectURL(doc.output("blob"));
    setPdfUrl(url);
