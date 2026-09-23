@@ -32,16 +32,23 @@ export default function RejectionPage(){
     return false;
    };
 
-   // Keep normal word spacing. The previous character-by-character
-   // justification caused PDF text extraction to join words together.
-   // This version wraps cleanly inside the A4 text block.
+   // Proper PDF justification: let jsPDF justify each wrapped line instead of
+   // manually moving individual words. This keeps normal word spacing in extraction.
    const paragraph=(text:string,spacing=4.5)=>{
     doc.setFont("times","normal");
     doc.setFontSize(10.5);
     const lines=doc.splitTextToSize(text,width) as string[];
     ensureSpace(lines.length*5.1+spacing);
-    doc.text(lines,left,y,{lineHeightFactor:1.25});
-    y+=lines.length*5.1+spacing;
+    lines.forEach((line:string,index:number)=>{
+     const isLast=index===lines.length-1;
+     if(isLast){
+      doc.text(line,left,y);
+     }else{
+      doc.text(line,left,y,{align:"justify",maxWidth:width});
+     }
+     y+=5.1;
+    });
+    y+=spacing;
    };
 
    doc.setFont("times","bold");
@@ -84,16 +91,23 @@ export default function RejectionPage(){
    const selected=reasonText[data.reason]||reasonText.R01;
    const reasonLines=doc.splitTextToSize(selected,width-9) as string[];
    ensureSpace(reasonLines.length*5.1+12);
-   // Selected reason: bold text + a clearly visible tick mark inside the box.
+   // Selected reason: bold text + clear tick mark + justified wrapped lines.
    doc.setDrawColor(0,0,0);
    doc.setLineWidth(0.55);
    doc.rect(left+1,y-3.5,4,4);
-   // Draw the tick as vector strokes so it renders correctly in every PDF viewer.
    doc.line(left+1.7,y-1.5,left+2.7,y-0.35);
    doc.line(left+2.7,y-0.35,left+4.35,y-2.45);
    doc.setFont("times","bold");
    doc.setFontSize(10.5);
-   doc.text(reasonLines,left+8,y,{lineHeightFactor:1.25});
+   reasonLines.forEach((line:string,index:number)=>{
+    const isLast=index===reasonLines.length-1;
+    if(isLast){
+     doc.text(line,left+8,y);
+    }else{
+     doc.text(line,left+8,y,{align:"justify",maxWidth:width-9});
+    }
+    y+=5.1;
+   });
    y+=reasonLines.length*5.1+8;
 
    paragraph("Now, therefore, in exercise of the powers vested under Section 22 of the Representation of the People Act, 1950, and having considered the material and, where applicable, the submissions made at the hearing, I am satisfied for the reason recorded above that the claim of the elector for retention of the entry in the electoral roll of AC No. 34-Matiala is not established.");
