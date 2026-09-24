@@ -36,10 +36,10 @@ export default function Page(){
   }catch{updateSlot(i,{message:"Database connection error. Please try again.",loading:false});}
  }
  function clearSlot(i:number){updateSlot(i,{epic:"",elector:null,reason:"",message:""});}
- async function generateFive(){if(slots.some(s=>!s.elector||!s.reason)){setMessage("Please complete all 5 EPIC entries and select a reason for each.");return;}setMessage("");setBusy(true);
-  try{for(let i=0;i<5;i++){const s=slots[i];const e=s.elector!;const blob=generateRejectionPdf({reason:s.reason,name:e.n,epic:e.e,serial:e.s,ps:e.p,date:e.d,time:e.t,venue:e.v,officer:e.o});
-    const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=`AC34_${e.e}_${s.reason}_Rejection_Order.pdf`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),5000);if(i<4)await new Promise(r=>setTimeout(r,700));}
-   setMessage("5 separate PDF orders generated. Check your Downloads folder.");}finally{setBusy(false);}
+ async function generateFive(){const ready=slots.filter(s=>s.elector&&s.reason);if(!ready.length){setMessage("Verify at least 1 EPIC and select a reason before generating.");return;}setMessage("");setBusy(true);
+  try{for(let i=0;i<ready.length;i++){const s=ready[i];const e=s.elector!;const blob=generateRejectionPdf({reason:s.reason,name:e.n,epic:e.e,serial:e.s,ps:e.p,date:e.d,time:e.t,venue:e.v,officer:e.o});
+    const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=`AC34_${e.e}_${s.reason}_Rejection_Order.pdf`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),5000);if(i<ready.length-1)await new Promise(r=>setTimeout(r,700));}
+   setMessage(`${ready.length} separate PDF order${ready.length===1?"":"s"} generated. Check your Downloads folder.`);}finally{setBusy(false);}
  }
  if(!token)return <main className="rejectHome"><div className="portalHeader"><div className="brand"><div className="crest">ECI</div><div><div className="eyebrow">SIR-2026 • AC-34 MATIALA</div><h1>Rejection Order Portal</h1><p>Officer-secured access</p></div></div><div className="status">Private officer login</div></div>
   <section className="panel"><div className="step"><span>1</span><div><h2>Officer Login</h2><p>Select your officer account and enter your private access code.</p></div></div>
@@ -55,6 +55,6 @@ export default function Page(){
      <div><small>NAME</small><b>{s.elector.n}</b></div><div><small>EPIC</small><b>{s.elector.e}</b></div><div><small>PS / SERIAL</small><b>{s.elector.p} / {s.elector.s}</b></div><div><small>HEARING DATE</small><b>{s.elector.d}</b></div><div><small>HEARING TIME</small><b>{s.elector.t}</b></div><div className="full"><small>VENUE</small><b>{s.elector.v||"—"}</b></div>
     </div>}{s.elector&&<select value={s.reason} onChange={e=>updateSlot(i,{reason:e.target.value})}><option value="">— Select Reason —</option>{reasons.map(x=><option value={x.id} key={x.id}>{x.label}</option>)}</select>}
     <button className="clearBtn" onClick={()=>clearSlot(i)}>CLEAR</button></div>)}</div>
-   {message&&<div className="alert">{message}</div>}<button className="generate batchGenerate" disabled={busy||slots.some(s=>!s.elector||!s.reason)} onClick={generateFive}>{busy?"GENERATING 5 PDFS…":"GENERATE 5 REJECTION ORDERS"}</button>
+   {message&&<div className="alert">{message}</div>}<button className="generate batchGenerate" disabled={busy||!slots.some(s=>s.elector&&s.reason)} onClick={generateFive}>{busy?"GENERATING PDFS…":`GENERATE ${slots.filter(s=>s.elector&&s.reason).length||""} REJECTION ORDER${slots.filter(s=>s.elector&&s.reason).length===1?"":"S"}`}</button>
   </section><footer>AC-34 Matiala • SIR-2026 • Authorised officer access only</footer></main>;
 }
