@@ -1,6 +1,6 @@
 "use client";
 
-import {useEffect,useState} from "react";
+import {useState} from "react";
 
 type RecordItem={p:string;e:string;s:string;n:string;d:string;t:string;r:string;v:string;o:string};
 const officers=["Sh. Parveen Kumar","Sh. Rakesh Kumar","Sh. Subhashish","Sh. Virender","Smt. Parul Gupta","Smt. Shashi Bala"];
@@ -10,36 +10,53 @@ const reasons=[
  {id:"R03",label:"R03 — Documents produced were found insufficient / inadmissible"}
 ];
 
+const SUPABASE_URL="https://giqybxcoireaxidokqwf.supabase.co";
+const SUPABASE_KEY="sb_publishable_Xc6dmMjjOC7qv8t4ko_EDQ_-wmH3MNh";
+
+async function searchRecord(epic:string, officer:string){
+ const url=new URL(SUPABASE_URL+"/rest/v1/sir_rejection_records");
+ url.searchParams.set("select","*");
+ url.searchParams.set("epic","eq."+epic);
+ url.searchParams.set("officer","eq."+officer);
+ url.searchParams.set("limit","1");
+ const res=await fetch(url.toString(),{headers:{apikey:SUPABASE_KEY}});
+ if(!res.ok) throw new Error("Database search failed");
+ const rows=await res.json();
+ return rows[0] as RecordItem|undefined;
+}
+
 export default function Page(){
- const [data,setData]=useState<RecordItem[]>([]);
  const [officer,setOfficer]=useState("");
  const [epic,setEpic]=useState("");
  const [elector,setElector]=useState<RecordItem|null>(null);
  const [reason,setReason]=useState("");
- const [loading,setLoading]=useState(true);
+ const [loading,setLoading]=useState(false);
  const [message,setMessage]=useState("");
 
- useEffect(()=>{
-  fetch("/rejection-records.json").then(r=>r.json()).then((x)=>setData(x)).catch(()=>setMessage("Master data could not be loaded.")).finally(()=>setLoading(false));
- },[]);
-
- function findElector(){
+ async function findElector(){
   setMessage(""); setElector(null); setReason("");
   const q=epic.trim().toUpperCase();
   if(!officer){setMessage("Please select the Officer.");return;}
   if(!q){setMessage("Please enter the EPIC No.");return;}
-  const found=data.find(x=>x.e.toUpperCase()===q && x.o===officer);
-  if(!found){
-   const any=data.find(x=>x.e.toUpperCase()===q);
-   setMessage(any ? "This EPIC is not assigned to the selected Officer." : "EPIC No. not found in the AC-34 master data.");
-   return;
-  }
-  setElector(found);
+  setLoading(true);
+  try{
+   const found=await searchRecord(q,officer);
+   if(!found){
+    setMessage("EPIC No. not found for the selected Officer.");
+    return;
+   }
+   setElector(found);
+  }catch{
+   setMessage("Database connection error. Please try again.");
+  }finally{setLoading(false);}
  }
 
  function generate(){
   if(!elector||!reason)return;
-  const params=new URLSearchParams({reason,...{name:elector.n,epic:elector.e,serial:elector.s,ps:elector.p,date:elector.d,time:elector.t,venue:elector.v,officer:elector.o}});
+  const params=new URLSearchParams({
+   reason,name:elector.n,epic:elector.e,serial:elector.s,ps:elector.p,
+   date:elector.d,time:elector.t,venue:elector.v,officer:elector.o
+  });
   window.location.href="/rejection?"+params.toString();
  }
 
@@ -49,7 +66,7 @@ export default function Page(){
     <div className="crest">ECI</div>
     <div><div className="eyebrow">SIR-2026 • AC-34 MATIALA</div><h1>Rejection Order Portal</h1><p>Elector-wise online rejection order generation</p></div>
    </div>
-   <div className="status">{loading?"Loading master data…":"Master data loaded • "+data.length.toLocaleString("en-IN")+" electors"}</div>
+   <div className="status">Secure master-data search • AC-34</div>
   </div>
 
   <section className="panel">
@@ -62,7 +79,7 @@ export default function Page(){
    <div className="step"><span>2</span><div><h2>Enter EPIC No.</h2><p>Paste the elector's EPIC number and click Search.</p></div></div>
    <div className="searchRow">
     <input value={epic} onChange={e=>setEpic(e.target.value.toUpperCase())} onKeyDown={e=>e.key==="Enter"&&findElector()} placeholder="e.g. WGO9877069" />
-    <button onClick={findElector}>SEARCH ELECTOR</button>
+    <button onClick={findElector} disabled={loading}>{loading?"SEARCHING…":"SEARCH ELECTOR"}</button>
    </div>
 
    {message&&<div className="alert">{message}</div>}
