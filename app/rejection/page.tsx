@@ -10,14 +10,15 @@ const reasonText:Record<string,string>={
  R03:"The elector appeared and produced document(s), which on scrutiny were found insufficient to establish linkage/eligibility."
 };
 const dec=(v:string)=>{try{return decodeURIComponent(v.replace(/\+/g," "))}catch{return v}};
+const formatDate=(v:string)=>{const m=v.match(/^(\d{4})-(\d{2})-(\d{2})$/);return m?m[3]+"-"+m[2]+"-"+m[1]:v};
 
 export default function RejectionPage(){
  const [pdfUrl,setPdfUrl]=useState("");
  const [error,setError]=useState("");
  const data=useMemo(()=>({
   reason:(get("reason")||"R01").toUpperCase(),
-  name:dec(get("name")),epic:dec(get("epic")),serial:dec(get("serial")),ps:dec(get("ps")),
-  date:dec(get("date")),time:dec(get("time")),venue:dec(get("venue")),officer:dec(get("officer"))
+  name:dec(get("name")).toUpperCase(),epic:dec(get("epic")).toUpperCase(),serial:dec(get("serial")),ps:dec(get("ps")),
+  date:formatDate(dec(get("date"))),time:dec(get("time")),venue:dec(get("venue")),officer:dec(get("officer"))
  }),[]);
 
  useEffect(()=>{
