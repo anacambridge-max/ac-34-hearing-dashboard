@@ -3,6 +3,7 @@
 import {useState} from "react";
 
 type RecordItem={p:string;e:string;s:string;n:string;d:string;t:string;r:string;v:string;o:string};
+type DbRow={part:string;epic:string;serial_no:string;elector_name:string;hearing_date:string|null;hearing_time:string;hearing_ref:string;venue:string;officer:string};
 const officers=["Sh. Parveen Kumar","Sh. Rakesh Kumar","Sh. Subhashish","Sh. Virender","Smt. Parul Gupta","Smt. Shashi Bala"];
 const reasons=[
  {id:"R01",label:"R01 — Elector absent; no supporting document received"},
@@ -10,19 +11,20 @@ const reasons=[
  {id:"R03",label:"R03 — Documents produced were found insufficient / inadmissible"}
 ];
 
-const SUPABASE_URL="https://giqybxcoireaxidokqwf.supabase.co";
-const SUPABASE_KEY="sb_publishable_Xc6dmMjjOC7qv8t4ko_EDQ_-wmH3MNh";
+const SEARCH_URL="https://giqybxcoireaxidokqwf.supabase.co/functions/v1/sir-rejection-search";
+
+function mapRow(row:DbRow):RecordItem{
+ return {p:String(row.part??""),e:String(row.epic??""),s:String(row.serial_no??""),n:String(row.elector_name??""),d:String(row.hearing_date??""),t:String(row.hearing_time??""),r:String(row.hearing_ref??""),v:String(row.venue??""),o:String(row.officer??"")};
+}
 
 async function searchRecord(epic:string, officer:string){
- const url=new URL(SUPABASE_URL+"/rest/v1/sir_rejection_records");
- url.searchParams.set("select","*");
- url.searchParams.set("epic","eq."+epic);
- url.searchParams.set("officer","eq."+officer);
- url.searchParams.set("limit","1");
- const res=await fetch(url.toString(),{headers:{apikey:SUPABASE_KEY}});
+ const url=new URL(SEARCH_URL);
+ url.searchParams.set("epic",epic);
+ url.searchParams.set("officer",officer);
+ const res=await fetch(url.toString());
  if(!res.ok) throw new Error("Database search failed");
- const rows=await res.json();
- return rows[0] as RecordItem|undefined;
+ const rows=(await res.json()) as DbRow[];
+ return rows[0]?mapRow(rows[0]):undefined;
 }
 
 export default function Page(){
