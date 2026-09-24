@@ -29,3 +29,27 @@
 .portalHeader .eyebrow{font-weight:700}
 .portalHeader .status{font-size:11px;font-weight:800;letter-spacing:.8px;border:1px solid rgba(255,255,255,.25)}
 @media(max-width:700px){.moduleTitle{padding:12px}.moduleTitle h2{font-size:16px}.moduleTitle p{font-size:11px}}
+
+/* ECI-inspired civic visual treatment (non-official mark) */
+.crest{position:relative;overflow:hidden;background:linear-gradient(180deg,#ff9933 0 33%,#fff 33% 66%,#138808 66% 100%);color:#102a43;border:2px solid #fff;box-shadow:0 0 0 2px rgba(255,255,255,.18),0 3px 10px rgba(0,0,0,.12)}
+.crest::after{content:"";position:absolute;width:13px;height:13px;border:1px solid #1d4ed8;border-radius:50%;left:50%;top:50%;transform:translate(-50%,-50%);opacity:.9}
+.crest{font-size:0}
+.crest::before{content:"ECI";position:absolute;z-index:2;left:50%;top:50%;transform:translate(-50%,-50%);font-size:12px;font-weight:900;letter-spacing:.5px;color:#102a43;background:rgba(255,255,255,.88);border-radius:4px;padding:2px 4px}
+.portalHeader{background:linear-gradient(108deg,#102a43 0%,#123b5d 58%,#173f68 100%);position:relative;overflow:hidden}
+.portalHeader::after{content:"";position:absolute;left:0;right:0;bottom:0;height:4px;background:linear-gradient(90deg,#ff9933 0 33.33%,#fff 33.33% 66.66%,#138808 66.66% 100%)}
+.portalHeader .brand{position:relative;z-index:1}
+.portalHeader .status{position:relative;z-index:1}
+.eyebrow{color:#f4c15d}
+.moduleTitle{border-left-color:#ff9933;background:linear-gradient(100deg,#fff8ed 0%,#fff 28%,#f7fbff 100%);box-shadow:0 2px 8px rgba(16,42,67,.04)}
+.moduleIcon{background:linear-gradient(145deg,#ff9933,#173f68 48%,#138808);box-shadow:0 3px 8px rgba(16,42,67,.12)}
+.batchCard{border-top:3px solid #173f68;background:linear-gradient(180deg,#ffffff,#fbfdff)}
+.batchCard:nth-child(5n+1){border-top-color:#ff9933}
+.batchCard:nth-child(5n+2){border-top-color:#e0a72d}
+.batchCard:nth-child(5n+3){border-top-color:#173f68}
+.batchCard:nth-child(5n+4){border-top-color:#5b8db8}
+.batchCard:nth-child(5n+5){border-top-color:#138808}
+.batchCard .searchRow button{background:linear-gradient(135deg,#174a8a,#2563eb);box-shadow:0 2px 5px rgba(37,99,235,.18)}
+.batchCard .searchRow button:hover{filter:brightness(1.05)}
+.batchCard select:focus,.batchCard input:focus{border-color:#174a8a}
+.miniDetails{background:linear-gradient(135deg,#f4fff7,#f8fcff);border-color:#b8dfc2}
+.batchGenerate{background:linear-gradient(90deg,#0b6f5f,#147d70 50%,#0b6f5f);box-shadow:0 4px 12px rgba(15,118,110,.16)}
