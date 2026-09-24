@@ -1,0 +1,1 @@
+export default function Import(){return <main style={{padding:40,fontFamily:'Arial'}}><h1>AC-34 Master Import</h1><p>Import page is ready.</p></main>} 
